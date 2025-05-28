@@ -1,0 +1,122 @@
+// Esquema Prisma para gestión de restaurante y bot WhatsApp
+// Comentarios en español para facilitar mantenimiento
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model RestaurantConfig {
+  id                  String   @id @default(cuid())
+  isOpen              Boolean  @default(true)
+  openingHours        Json     // {"monday": {"open": "08:00", "close": "22:00"}}
+  menuItems           Json     // Estructura completa del menú con precios
+  deliveryZones       Json     // Zonas con precios y tiempos de entrega
+  preparationTimes    Json     // Tiempo de preparación por categoría
+  maxMessagesPerHour  Int      @default(10)
+  escalationKeywords  String[]
+  autoResponses       Json
+  updatedAt           DateTime @updatedAt
+}
+
+model Conversation {
+  id                String             @id @default(cuid())
+  phoneNumber       String
+  customerName      String?
+  status            ConversationStatus @default(BOT_ACTIVE)
+  escalationReason  String?
+  priority          Priority           @default(LOW)
+  humanAssigned     String?
+  messageCount      Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  lastBotMessageAt  DateTime?
+
+  messages          Message[]
+  orders            Order[]
+
+  @@index([phoneNumber])
+  @@index([status])
+}
+
+model Message {
+  id               String      @id @default(cuid())
+  conversationId   String
+  conversation     Conversation @relation(fields: [conversationId], references: [id])
+  sender           MessageSender
+  content          String
+  timestamp        DateTime    @default(now())
+  wasFiltered      Boolean     @default(false)
+  geminiResponse   Json?
+  processingTimeMs Int?
+  wasEscalated     Boolean     @default(false)
+
+  @@index([conversationId])
+}
+
+model CustomerProfile {
+  phoneNumber        String   @id
+  name               String?
+  favoriteItems      String[]
+  usualAddress       String?
+  preferredPayment   String?
+  orderCount         Int      @default(0)
+  totalSpent         Decimal  @default(0)
+  lastOrderDate      DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model Order {
+  id               String        @id @default(cuid())
+  conversationId   String
+  conversation     Conversation  @relation(fields: [conversationId], references: [id])
+  items            Json          // Items del pedido con cantidades y precios
+  totalAmount      Decimal
+  deliveryAddress  String
+  status           OrderStatus   @default(PENDING)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+}
+
+model UserActivity {
+  phoneNumber     String   @id
+  messageCount    Int      @default(0)
+  lastMessageAt   DateTime @default(now())
+  lastResetAt     DateTime @default(now())
+  isBlocked       Boolean  @default(false)
+  warningCount    Int      @default(0)
+}
+
+enum ConversationStatus {
+  BOT_ACTIVE
+  HUMAN_TAKEOVER
+  WAITING_HUMAN
+  BLOCKED
+  COMPLETED
+}
+
+enum MessageSender {
+  CUSTOMER
+  BOT
+  HUMAN
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+} 
