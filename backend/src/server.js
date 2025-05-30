@@ -1,3 +1,4 @@
+import './whatsapp/bot.js';
 import app from './app.js';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -12,11 +13,11 @@ const io = new SocketIOServer(server, {
   }
 });
 
-// Ejemplo de evento de conexión Socket.io
+// Example Socket.io connection event
 io.on('connection', (socket) => {
-  console.log('Cliente conectado al dashboard en tiempo real');
+  console.log('Client connected to real-time dashboard');
 });
 
 server.listen(PORT, () => {
-  console.log(`Servidor escuchando en puerto ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 }); 

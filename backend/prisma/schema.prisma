@@ -1,5 +1,5 @@
-// Esquema Prisma para gestión de restaurante y bot WhatsApp
-// Comentarios en español para facilitar mantenimiento
+// Prisma schema for restaurant and WhatsApp bot management
+// Comments in English for maintainability
 
 generator client {
   provider = "prisma-client-js"
@@ -14,13 +14,24 @@ model RestaurantConfig {
   id                  String   @id @default(cuid())
   isOpen              Boolean  @default(true)
   openingHours        Json     // {"monday": {"open": "08:00", "close": "22:00"}}
-  menuItems           Json     // Estructura completa del menú con precios
-  deliveryZones       Json     // Zonas con precios y tiempos de entrega
-  preparationTimes    Json     // Tiempo de preparación por categoría
+  menuItems           Json     // Complete menu structure with prices
+  deliveryZones       Json     // Zones with pricing and delivery times
+  preparationTimes    Json     // Preparation time per product category
   maxMessagesPerHour  Int      @default(10)
   escalationKeywords  String[]
   autoResponses       Json
   updatedAt           DateTime @updatedAt
+  filterKeywords      String[]
+  restaurantName      String   @default("")
+  orderMethod         String   @default("")
+  botTone             String   @default("")
+  unrelatedMessage    String   @default("")
+  bannedNumbers       String[]
+  outOfHoursMessage   String?
+  enableReorderOption Boolean  @default(true)
+  maxReorderDays      Int      @default(30)
+  welcomeBackMessage  String?
+  firstTimeMessage    String?
 }
 
 model Conversation {
@@ -38,6 +49,7 @@ model Conversation {
 
   messages          Message[]
   orders            Order[]
+  orderDrafts       OrderDraft[]
 
   @@index([phoneNumber])
   @@index([status])
@@ -69,18 +81,28 @@ model CustomerProfile {
   lastOrderDate      DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+  lastOrderId        String?
+  lastOrder          Order?   @relation("LastOrder", fields: [lastOrderId], references: [id])
+  preferredOrderTime String?
+  averageOrderValue  Decimal  @default(0)
 }
 
 model Order {
   id               String        @id @default(cuid())
   conversationId   String
   conversation     Conversation  @relation(fields: [conversationId], references: [id])
-  items            Json          // Items del pedido con cantidades y precios
+  items            Json          // Order items with quantities and prices
   totalAmount      Decimal
   deliveryAddress  String
   status           OrderStatus   @default(PENDING)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
+  orderSource      OrderSource   @default(CHAT)
+  isReorder        Boolean       @default(false)
+  originalOrderId  String?
+  originalOrder    Order?        @relation("ReorderRef", fields: [originalOrderId], references: [id])
+  reorders         Order[]       @relation("ReorderRef")
+  customerLastOrder CustomerProfile[] @relation("LastOrder")
 }
 
 model UserActivity {
@@ -90,6 +112,19 @@ model UserActivity {
   lastResetAt     DateTime @default(now())
   isBlocked       Boolean  @default(false)
   warningCount    Int      @default(0)
+}
+
+model OrderDraft {
+  id             String        @id @default(cuid())
+  conversationId String
+  conversation   Conversation  @relation(fields: [conversationId], references: [id])
+  itemName       String?
+  itemId         String?
+  quantity       Int?
+  status         String        @default("IN_PROGRESS")
+  extraData      Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 }
 
 enum ConversationStatus {
@@ -119,4 +154,12 @@ enum OrderStatus {
   OUT_FOR_DELIVERY
   DELIVERED
   CANCELLED
+}
+
+enum OrderSource {
+  CHAT
+  WEB_MENU
+  REORDER
+  VOICE_NOTE
+  SCHEDULED
 } 

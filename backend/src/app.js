@@ -3,27 +3,37 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { errorHandler } from './middleware/errorHandler.js';
+import messagesRouter from './routes/messages.js';
+import configRouter from './routes/config.js';
+import dashboardRouter from './routes/dashboard.js';
+import ordersRouter from './routes/orders.js';
+import customersRouter from './routes/customers.js';
+import escalationsRouter from './routes/escalations.js';
+import keywordsRouter from './routes/keywords.js';
+import menuRouter from './routes/menu.js';
 
 const app = express();
 
-// Seguridad HTTP
+// HTTP security headers
 app.use(helmet());
-// Permitir CORS
+// Enable CORS
 app.use(cors());
-// Parseo de JSON
+// JSON body parsing
 app.use(express.json());
-// Logging de requests
+// Request logging
 app.use(morgan('dev'));
 
-// Rutas (se agregarán routers específicos más adelante)
-// app.use('/api/messages', messagesRouter);
-// app.use('/api/config', configRouter);
-// app.use('/api/dashboard', dashboardRouter);
-// app.use('/api/orders', ordersRouter);
-// app.use('/api/customers', customersRouter);
-// app.use('/api/escalations', escalationsRouter);
+// Register API routes
+app.use('/api/messages', messagesRouter);
+app.use('/api/config', configRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/orders', ordersRouter);
+app.use('/api/customers', customersRouter);
+app.use('/api/escalations', escalationsRouter);
+app.use('/api/keywords', keywordsRouter);
+app.use('/api/menu', menuRouter);
 
-// Middleware de manejo de errores
+// Centralized error handler
 app.use(errorHandler);
 
 export default app; 
