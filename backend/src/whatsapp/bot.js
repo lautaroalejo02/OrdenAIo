@@ -35,6 +35,9 @@ import qrcode from 'qrcode';
           if (err) return console.error('Error saving QR PNG:', err);
           console.log('QR code saved as qr.png in the backend directory. You can open or share this PNG.');
         });
+        // --- NEW: One-line logs for Railway/cloud logs ---
+        console.log(`[QR-LINK] https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qr)}`);
+        console.log(`[QR-STRING] ${qr}`);
       });
     });
 
