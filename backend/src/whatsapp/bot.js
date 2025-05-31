@@ -24,6 +24,17 @@ import qrcode from 'qrcode';
         if (err) return console.error('Error generating QR code:', err);
         console.log('Scan this QR code with WhatsApp to log in:');
         console.log(url);
+        // Print the raw QR string
+        console.log('\nRaw QR string (for web QR generators):');
+        console.log(qr);
+        // Print a direct link to view the QR in the browser
+        console.log('\nOpen this link in your browser to scan the QR with your phone:');
+        console.log(`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qr)}`);
+        // Save QR as PNG
+        qrcode.toFile('qr.png', qr, { width: 400 }, (err) => {
+          if (err) return console.error('Error saving QR PNG:', err);
+          console.log('QR code saved as qr.png in the backend directory. You can open or share this PNG.');
+        });
       });
     });
 
