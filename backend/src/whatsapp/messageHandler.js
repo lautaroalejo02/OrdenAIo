@@ -265,32 +265,49 @@ export async function handleIncomingMessage(msg, client) {
       }
       let extracted = extractOrderItemsAndQuantities(messageContent, menuItems);
       console.log('[WA] extractOrderItemsAndQuantities result:', extracted);
+      // --- Handle generic item requests with multiple variants ---
       if (extracted.length === 0) {
-        const lastOrders = await prisma.order.findMany({
-          where: { conversationId: conversation.id },
-          orderBy: { createdAt: 'desc' },
-          take: 3
-        });
-        const geminiResult = await extractOrderWithGemini(messageContent, menuItems, lastOrders);
-        console.log('[WA] Gemini extraction result:', geminiResult);
-        // Robustly map Gemini results to menu items by normalized name
-        extracted = (geminiResult || []).map(aiItem => {
-          const menuItem = menuItems.find(i => i.name.toLowerCase().replace(/\s+/g, '') === aiItem.itemName.toLowerCase().replace(/\s+/g, ''));
-          return menuItem ? { itemId: menuItem.id, itemName: menuItem.name, quantity: aiItem.quantity, action: null, price: menuItem.price } : null;
-        }).filter(Boolean);
-        if (extracted.length === 0) {
-          console.log('[WA] No items extracted after Gemini, replying fallback.');
-          await msg.reply('No pude entender tu pedido, ¿podrías aclararlo o elegir del menú?');
+        // Try to find a generic word in the message that matches multiple menu items
+        const words = messageContent.toLowerCase().split(/\s|,|\./).filter(Boolean);
+        let genericMatches = [];
+        for (const word of words) {
+          // Find all menu items that include this word (singular/plural)
+          const baseWord = word.replace(/s$/, '');
+          const matches = menuItems.filter(i => i.name.toLowerCase().includes(baseWord));
+          if (matches.length > 1) {
+            genericMatches = matches;
+            break;
+          }
+        }
+        if (genericMatches.length > 1) {
+          const options = genericMatches.map(i => i.name).join(', ');
+          await msg.reply(`¿De qué tipo de ${genericMatches[0].name.split(' ')[0].toLowerCase()} querés? Tenemos: ${options}.`);
           return;
         }
       }
-      let items = draft.extraData?.items || [];
+      // --- Detect 'mejor quiero', 'prefiero', etc. as replace intent ---
+      const replacePhrases = ['mejor quiero', 'prefiero', 'cambio a', 'cambiá a', 'cambia a', 'mejor pedí', 'mejor pido'];
+      if (replacePhrases.some(phrase => messageContent.toLowerCase().includes(phrase))) {
+        if (draft && draft.extraData?.items?.length > 0 && extracted.length > 0) {
+          // Force replace intent logic
+          const normalize = str => str.toLowerCase().replace(/\s+/g, '');
+          const extractedNames = extracted.map(i => normalize(i.itemName)).sort().join(',');
+          const currentNames = draft.extraData.items.map(i => normalize(i.itemName)).sort().join(',');
+          if (extractedNames !== currentNames) {
+            const summary = extracted.map(i => `${i.itemName} x${i.quantity || '? '}`).join(', ');
+            console.log('[WA] Replace intent (mejor quiero/prefiero) detected, asking for confirmation:', summary);
+            await updateDraft(draft.id, { extraData: { ...draft.extraData, pendingAction: 'replace', proposedItems: extracted } });
+            await msg.reply(`¿Querés que quite los otros ítems y deje solo ${summary} en tu pedido? Responde SÍ para confirmar o NO para mantener el pedido anterior.`);
+            return;
+          }
+        }
+      }
       // --- Robust replace intent detection and confirmation ---
-      if (detectReplaceIntent(messageContent) && items.length > 0) {
+      if (detectReplaceIntent(messageContent) && extracted.length > 0) {
         // Compare by normalized name if IDs are missing
         const normalize = str => str.toLowerCase().replace(/\s+/g, '');
         const extractedNames = extracted.map(i => normalize(i.itemName)).sort().join(',');
-        const currentNames = items.map(i => normalize(i.itemName)).sort().join(',');
+        const currentNames = draft.extraData.items.map(i => normalize(i.itemName)).sort().join(',');
         if (extractedNames !== currentNames) {
           // Log and ask for confirmation before replacing
           const summary = extracted.map(i => `${i.itemName} x${i.quantity}`).join(', ');
