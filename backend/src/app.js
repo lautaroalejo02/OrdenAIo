@@ -11,6 +11,7 @@ import customersRouter from './routes/customers.js';
 import escalationsRouter from './routes/escalations.js';
 import keywordsRouter from './routes/keywords.js';
 import menuRouter from './routes/menu.js';
+import aiAdminRoutes from './routes/aiAdmin.js';
 
 const app = express();
 
@@ -32,6 +33,7 @@ app.use('/api/customers', customersRouter);
 app.use('/api/escalations', escalationsRouter);
 app.use('/api/keywords', keywordsRouter);
 app.use('/api/menu', menuRouter);
+app.use('/api/admin', aiAdminRoutes);
 
 // Centralized error handler
 app.use(errorHandler);

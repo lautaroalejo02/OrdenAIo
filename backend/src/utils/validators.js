@@ -107,103 +107,287 @@ function normalize(str) {
 }
 
 /**
- * Enhanced extraction: matches (quantity) + (category/item) + (optional 'de' + filling)
- * Handles 'docena', 'media docena', plurals, and fuzzy category+filling matching.
- * Now also matches all menu items containing the category word in singular or plural if no filling is specified.
- * @param {string} message - The user's message
- * @param {Array} menuItems - The menu items to match against
- * @returns {Array} Array of { itemId, itemName, quantity, action }
+ * UNIVERSAL EXTRACTION FUNCTION THAT WORKS
+ * Replaces the previous extractOrderItemsAndQuantities
  */
 export function extractOrderItemsAndQuantities(message, menuItems) {
-  const resultsMap = new Map(); // key: itemId, value: { itemId, itemName, quantity }
-  const normalizedMsg = normalize(message);
-  // If the message contains 'no' (negation/correction), split and only use the last part
-  let segments = normalizedMsg.split(/\bno\b/);
-  let segmentToUse = segments[segments.length - 1].trim();
-  // Enhanced regex to support plural 'docenas', 'medias docenas', and quantity before them
-  const regex = /(?:(\d+|una|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+)?(media docena|media docenas|docena|docenas|medias docenas|[a-záéíóúüñ]+)(?:\s+de\s+([a-záéíóúüñ\s]+))?/gi;
-  let match;
-  while ((match = regex.exec(segmentToUse)) !== null) {
-    let [, qtyRaw, categoryRaw, fillingRaw] = match;
-    let quantity = 1;
-    let itemForms = [];
-    // Special handling for 'docena', 'docenas', 'media docena', 'medias docenas'
-    const isDocena = /^(docena|docenas)$/.test(categoryRaw);
-    const isMediaDocena = /^(media docena|media docenas|medias docenas)$/.test(categoryRaw);
-    if ((isDocena || isMediaDocena) && fillingRaw) {
-      let baseQty = isDocena ? 12 : 6;
-      let multiplier = 1;
-      if (qtyRaw) {
-        const map = {
-          'una': 1, 'un': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5, 'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10
-        };
-        multiplier = map[qtyRaw] || parseInt(qtyRaw) || 1;
-      }
-      quantity = baseQty * multiplier;
-      itemForms = getSingularAndPlural(fillingRaw.trim());
-      // Try to match menu items where filling is a substring of the item name
-      let fillingMatches = menuItems.filter(item => {
-        const itemNameNorm = normalize(item.name);
-        return itemForms.some(form => itemNameNorm.includes(form));
-      });
-      if (fillingMatches.length === 1) {
-        const item = fillingMatches[0];
-        resultsMap.set(item.id, { itemId: item.id, itemName: item.name, quantity });
-        continue;
-      } else if (fillingMatches.length > 1) {
-        // Multiple matches, skip extraction so bot can ask for clarification
-        continue;
-      }
-      // If no match, fallback to original logic
-    } else {
-      if (qtyRaw) {
-        const map = {
-          'una': 1, 'un': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5, 'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10
-        };
-        quantity = map[qtyRaw] || parseInt(qtyRaw) || 1;
-      }
-      itemForms = getSingularAndPlural(categoryRaw);
+  console.log('[EXTRACT] Universal extraction for:', message);
+  
+  if (!message || !menuItems || menuItems.length === 0) {
+    return [];
+  }
+
+  const results = [];
+  const normalized = message.toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  console.log('[EXTRACT] Normalized:', normalized);
+
+  // STEP 1: Special quantities (docena, media docena, par)
+  const specialPatterns = [
+    { 
+      regex: /(?:(\d+)\s+)?(?:media\s+)?docenas?\s*(?:de\s+)?(.+?)(?:\s|$)/gi, 
+      multiplier: 12,
+      name: 'docena'
+    },
+    { 
+      regex: /(?:(\d+)\s+)?medias?\s+docenas?\s*(?:de\s+)?(.+?)(?:\s|$)/gi, 
+      multiplier: 6,
+      name: 'media_docena'
+    },
+    { 
+      regex: /media\s+docena\s*(?:de\s+)?(.+?)(?:\s|$)/gi, 
+      multiplier: 6,
+      name: 'media_docena_simple'
+    },
+    {
+      regex: /(?:un\s+)?par\s*(?:de\s+)?(.+?)(?:\s|$)/gi,
+      multiplier: 2,
+      name: 'par'
     }
-    // Try to match menu items by name (robust, both singular/plural)
-    let matchedItems = menuItems.filter(item => {
-      const itemNameNorm = normalize(item.name);
-      if ((isDocena || isMediaDocena) && fillingRaw) {
-        // For 'docenas de empanadas de carne', match fillingRaw
-        return itemForms.some(form => itemNameNorm.includes(form));
-      } else if (fillingRaw) {
-        const fillingForms = getSingularAndPlural(fillingRaw);
-        return itemForms.some(form => itemNameNorm.includes(form)) && fillingForms.some(form => itemNameNorm.includes(form));
-      } else {
-        return itemForms.some(form => itemNameNorm.includes(form));
-      }
-    });
-    if (matchedItems.length === 0 && fillingRaw && menuItems[0]?.category) {
-      matchedItems = menuItems.filter(item => {
-        const catNorm = normalize(item.category || '');
-        return itemForms.some(form => catNorm.includes(form));
-      });
-    }
-    // For each item, keep only the largest quantity found in the message
-    for (const item of matchedItems) {
-      if (resultsMap.has(item.id)) {
-        resultsMap.get(item.id).quantity = Math.max(resultsMap.get(item.id).quantity, quantity);
-      } else {
-        resultsMap.set(item.id, { itemId: item.id, itemName: item.name, quantity });
+  ];
+
+  for (const pattern of specialPatterns) {
+    let match;
+    const regex = new RegExp(pattern.regex.source, 'gi');
+    
+    while ((match = regex.exec(normalized)) !== null) {
+      const count = parseInt(match[1]) || 1;
+      const productPhrase = (match[2] || match[1] || '').trim();
+      const quantity = pattern.multiplier * count;
+      
+      console.log(`[EXTRACT] ${pattern.name} found:`, { count, productPhrase, quantity });
+
+      if (productPhrase.length > 2) {
+        const matchedItems = findProductMatches(productPhrase, menuItems);
+        
+        for (const item of matchedItems) {
+          results.push({
+            itemId: item.id,
+            itemName: item.name,
+            quantity: quantity,
+            confidence: 0.9,
+            method: pattern.name
+          });
+          console.log('[EXTRACT] Added:', item.name, 'qty:', quantity);
+        }
       }
     }
   }
-  // If nothing matched, try matching the whole message to any menu item (fuzzy)
-  if (resultsMap.size === 0) {
+
+  // STEP 2: Normal quantities if no special found
+  if (results.length === 0) {
+    const normalPatterns = [
+      /(\d+)\s+(.+?)(?:\s|$)/gi,  // "3 empanadas"
+      /(una?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(.+?)(?:\s|$)/gi,  // "dos pizzas"
+      /quiero\s+(\d+|una?|dos|tres)\s+(.+?)(?:\s|$)/gi,  // "quiero 2 empanadas"
+      /(?:dame|vendeme|necesito)\s+(.+?)(?:\s|$)/gi,  // "dame pizza"
+      /(.+?)\s*(?:por|x)\s*(\d+)/gi  // "empanada x 3"
+    ];
+
+    for (const pattern of normalPatterns) {
+      let match;
+      const regex = new RegExp(pattern.source, 'gi');
+      
+      while ((match = regex.exec(normalized)) !== null) {
+        let quantity = 1;
+        let productPhrase = '';
+
+        // Determine quantity and product
+        if (pattern.source.includes('\\d+.*\\.+')) {
+          // Pattern "3 empanadas"
+          quantity = parseInt(match[1]) || 1;
+          productPhrase = match[2];
+        } else if (pattern.source.includes('una?|dos')) {
+          // Pattern "dos empanadas"
+          const qtyMap = {
+            'una': 1, 'un': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 
+            'cinco': 5, 'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10
+          };
+          quantity = qtyMap[match[1]] || 1;
+          productPhrase = match[2];
+        } else if (pattern.source.includes('dame|vendeme')) {
+          // Pattern "dame pizza"
+          productPhrase = match[1];
+          quantity = 1;
+        } else if (pattern.source.includes('por|x')) {
+          // Pattern "empanada x 3"
+          productPhrase = match[1];
+          quantity = parseInt(match[2]) || 1;
+        } else if (pattern.source.includes('quiero')) {
+          // Pattern "quiero 2 empanadas"
+          if (isNaN(parseInt(match[1]))) {
+            const qtyMap = { 'una': 1, 'un': 1, 'dos': 2, 'tres': 3 };
+            quantity = qtyMap[match[1]] || 1;
+          } else {
+            quantity = parseInt(match[1]) || 1;
+          }
+          productPhrase = match[2];
+        }
+
+        console.log('[EXTRACT] Normal pattern found:', { quantity, productPhrase });
+
+        if (productPhrase && productPhrase.length > 2) {
+          const matchedItems = findProductMatches(productPhrase, menuItems);
+          
+          for (const item of matchedItems) {
+            results.push({
+              itemId: item.id,
+              itemName: item.name,
+              quantity: quantity,
+              confidence: 0.8,
+              method: 'normal_pattern'
+            });
+            console.log('[EXTRACT] Added normal:', item.name, 'qty:', quantity);
+          }
+        }
+      }
+    }
+  }
+
+  // STEP 3: Fallback - find any mentioned product
+  if (results.length === 0) {
+    console.log('[EXTRACT] Trying fallback matching...');
+    
+    const words = normalized.split(/\s+/).filter(w => w.length > 2);
+    
     for (const item of menuItems) {
-      const itemNameNorm = normalize(item.name);
-      if (segmentToUse.includes(itemNameNorm)) {
-        resultsMap.set(item.id, { itemId: item.id, itemName: item.name, quantity: 1 });
+      const itemWords = item.name.toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .split(/\s+/)
+        .filter(w => w.length > 2);
+      
+      // Find word matches
+      const matchingWords = words.filter(word => 
+        itemWords.some(itemWord => 
+          itemWord.includes(word) || word.includes(itemWord)
+        )
+      );
+      
+      if (matchingWords.length > 0) {
+        results.push({
+          itemId: item.id,
+          itemName: item.name,
+          quantity: 1,
+          confidence: 0.6,
+          method: 'fallback'
+        });
+        console.log('[EXTRACT] Fallback match:', item.name);
+        break; // Only take the first match in fallback
       }
     }
   }
-  const results = Array.from(resultsMap.values());
-  console.log('[EXTRACT] extractOrderItemsAndQuantities:', { message, results });
-  return results;
+
+  // Remove duplicates and keep highest confidence
+  const deduped = deduplicateResults(results);
+  
+  console.log('[EXTRACT] Final results:', deduped);
+  return deduped;
+}
+
+/**
+ * Finds products that match a phrase
+ */
+function findProductMatches(phrase, menuItems) {
+  if (!phrase || phrase.length < 2) return [];
+
+  const matches = [];
+  const phraseWords = phrase.split(/\s+/).filter(w => w.length > 2);
+
+  for (const item of menuItems) {
+    const score = calculateProductMatchScore(phraseWords, item);
+    if (score > 0.3) {
+      matches.push({ item, score });
+    }
+  }
+
+  // Sort by score and return best
+  return matches
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2)  // Max 2 matches per phrase
+    .map(m => m.item);
+}
+
+/**
+ * Calculates match score between phrase words and product
+ */
+function calculateProductMatchScore(phraseWords, item) {
+  const itemText = [
+    item.name,
+    item.category || '',
+    item.description || ''
+  ].join(' ').toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const itemWords = itemText.split(/\s+/).filter(w => w.length > 2);
+
+  if (phraseWords.length === 0 || itemWords.length === 0) return 0;
+
+  let score = 0;
+  
+  for (const phraseWord of phraseWords) {
+    let bestWordScore = 0;
+    
+    for (const itemWord of itemWords) {
+      // Exact match
+      if (phraseWord === itemWord) {
+        bestWordScore = 1;
+        break;
+      }
+      
+      // Contains the word
+      if (itemWord.includes(phraseWord)) {
+        bestWordScore = Math.max(bestWordScore, 0.9);
+      } else if (phraseWord.includes(itemWord)) {
+        bestWordScore = Math.max(bestWordScore, 0.8);
+      }
+      
+      // Similarity by common prefix length
+      const commonLength = getCommonPrefixLength(phraseWord, itemWord);
+      if (commonLength >= 3) {
+        const similarity = commonLength / Math.max(phraseWord.length, itemWord.length);
+        bestWordScore = Math.max(bestWordScore, similarity * 0.7);
+      }
+    }
+    
+    score += bestWordScore;
+  }
+
+  return score / phraseWords.length;
+}
+
+/**
+ * Gets common prefix length
+ */
+function getCommonPrefixLength(str1, str2) {
+  let i = 0;
+  while (i < str1.length && i < str2.length && str1[i] === str2[i]) {
+    i++;
+  }
+  return i;
+}
+
+/**
+ * Removes duplicates keeping highest confidence
+ */
+function deduplicateResults(results) {
+  const seen = new Map();
+  
+  for (const result of results) {
+    const key = result.itemId;
+    if (!seen.has(key) || seen.get(key).confidence < result.confidence) {
+      seen.set(key, result);
+    }
+  }
+  
+  return Array.from(seen.values())
+    .sort((a, b) => b.confidence - a.confidence);
 }
 
 /**
