@@ -276,4 +276,24 @@ export function isRemoveIntent(message) {
     lower.includes('borrá') ||
     lower.includes('remové')
   );
+}
+
+/**
+ * Detects if the message is a 'replace' intent (e.g., 'solo', 'nomás', 'nada más', 'únicamente', etc.)
+ * @param {string} message
+ * @returns {boolean}
+ */
+export function detectReplaceIntent(message) {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('solo ') ||
+    lower.includes('sólo ') ||
+    lower.includes('nomás') ||
+    lower.includes('nomas') ||
+    lower.includes('nada más') ||
+    lower.includes('únicamente') ||
+    lower.includes('solamente') ||
+    lower.includes('dejar solo') ||
+    lower.includes('deja solo')
+  );
 } 
