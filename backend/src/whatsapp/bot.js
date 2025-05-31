@@ -1,9 +1,19 @@
 console.log('Starting WhatsApp bot...');
 
 import qrcode from 'qrcode';
+import fs from 'fs-extra';
 
 (async () => {
   try {
+    // --- Force QR: Delete session folder on every start ---
+    const sessionPath = process.env.WHATSAPP_SESSION_PATH || './whatsapp-session';
+    try {
+      await fs.remove(sessionPath);
+      console.log(`[WA] Deleted session folder: ${sessionPath} (forcing QR on next start)`);
+    } catch (err) {
+      console.warn(`[WA] Could not delete session folder: ${sessionPath}`, err);
+    }
+
     const pkg = await import('whatsapp-web.js');
     const { Client, LocalAuth } = pkg.default;
 
