@@ -17,11 +17,12 @@ import {
   isOrderCancellation,
   isQuantityOnlyMessage,
   isAddIntent,
-  isRemoveIntent
+  isRemoveIntent,
+  detectReplaceIntent
 } from '../utils/validators.js';
 import { extractOrderWithGemini } from '../services/gemini.js';
 
-const APP_URL = process.env.APP_URL || 'http://localhost:5173';
+const APP_URL = process.env.APP_URL && process.env.APP_URL !== '' ? process.env.APP_URL : 'http://localhost:5173';
 
 // Helper to get customer type
 async function getCustomerType(phoneNumber) {
@@ -150,6 +151,12 @@ export async function handleIncomingMessage(msg, client) {
       console.log('[WA] Greeting detected, will reset draft and reply.');
       // Personalized greeting/options
       const optionsMsg = await generateOrderOptions(phoneNumber);
+      // Always delete draft on greeting
+      let draft = await getDraftByConversationId(conversation.id);
+      if (draft) {
+        await deleteDraft(draft.id);
+        console.log('[WA] Draft deleted due to greeting.');
+      }
       await prisma.conversation.update({ where: { id: conversation.id }, data: { updatedAt: now } });
       await msg.reply(optionsMsg);
       return;
@@ -157,7 +164,10 @@ export async function handleIncomingMessage(msg, client) {
     // If should reset, delete draft and start fresh
     if (shouldResetDraft) {
       let draft = await getDraftByConversationId(conversation.id);
-      if (draft) await deleteDraft(draft.id);
+      if (draft) {
+        await deleteDraft(draft.id);
+        console.log('[WA] Draft deleted due to expiration.');
+      }
       await prisma.conversation.update({ where: { id: conversation.id }, data: { updatedAt: now } });
       await msg.reply('¡Hola! ¿Qué te gustaría pedir hoy? Te paso nuestro menú: ' + menuItems.map(i => i.name).join(', ') + '.');
       return;
@@ -218,6 +228,41 @@ export async function handleIncomingMessage(msg, client) {
 
     // If there is a draft, update it with new info or handle add/remove/change
     if (draft) {
+      // Handle pending replace confirmation
+      if (draft.extraData?.pendingAction === 'replace' && (lowerContent === 'sí' || lowerContent === 'si')) {
+        // Replace draft items with last proposedItems
+        const proposedItems = draft.extraData.proposedItems || [];
+        await updateDraft(draft.id, { extraData: { items: proposedItems } });
+        const summary = proposedItems.map(i => `${i.itemName} x${i.quantity}`).join(', ');
+        const total = proposedItems.reduce((sum, i) => sum + (i.price || 0) * (i.quantity || 1), 0);
+        await msg.reply(`Listo, actualicé tu pedido: ${summary}\nTotal: $${total}`);
+        return;
+      } else if (draft.extraData?.pendingAction === 'replace' && (lowerContent === 'no')) {
+        // Cancel replace
+        await updateDraft(draft.id, { extraData: { ...draft.extraData, pendingAction: undefined, proposedItems: undefined } });
+        await msg.reply('Perfecto, mantengo tu pedido anterior. ¿Querés agregar o quitar algo más?');
+        return;
+      }
+      // Handle pending remove confirmation
+      if (draft.extraData?.pendingAction === 'remove' && (lowerContent === 'sí' || lowerContent === 'si')) {
+        // Remove the proposed items from the draft
+        const items = draft.extraData.items || [];
+        const toRemove = draft.extraData.proposedItems || [];
+        const remaining = items.filter(i => !toRemove.some(r => r.itemId === i.itemId));
+        await updateDraft(draft.id, { extraData: { items: remaining } });
+        if (remaining.length > 0) {
+          const summary = remaining.map(i => `${i.itemName} x${i.quantity}`).join(', ');
+          const total = remaining.reduce((sum, i) => sum + (i.price || 0) * (i.quantity || 1), 0);
+          await msg.reply(`Listo, quité los productos. Tu pedido ahora es: ${summary}\nTotal: $${total}`);
+        } else {
+          await msg.reply('Listo, quité los productos. Tu pedido está vacío. ¿Querés agregar algo más?');
+        }
+        return;
+      } else if (draft.extraData?.pendingAction === 'remove' && (lowerContent === 'no')) {
+        await updateDraft(draft.id, { extraData: { ...draft.extraData, pendingAction: undefined, proposedItems: undefined } });
+        await msg.reply('Perfecto, mantengo tu pedido anterior. ¿Querés agregar o quitar algo más?');
+        return;
+      }
       let extracted = extractOrderItemsAndQuantities(messageContent, menuItems);
       console.log('[WA] extractOrderItemsAndQuantities result:', extracted);
       if (extracted.length === 0) {
@@ -228,9 +273,10 @@ export async function handleIncomingMessage(msg, client) {
         });
         const geminiResult = await extractOrderWithGemini(messageContent, menuItems, lastOrders);
         console.log('[WA] Gemini extraction result:', geminiResult);
+        // Robustly map Gemini results to menu items by normalized name
         extracted = (geminiResult || []).map(aiItem => {
-          const menuItem = menuItems.find(i => i.name.toLowerCase() === aiItem.itemName.toLowerCase());
-          return menuItem ? { itemId: menuItem.id, itemName: menuItem.name, quantity: aiItem.quantity, action: null } : null;
+          const menuItem = menuItems.find(i => i.name.toLowerCase().replace(/\s+/g, '') === aiItem.itemName.toLowerCase().replace(/\s+/g, ''));
+          return menuItem ? { itemId: menuItem.id, itemName: menuItem.name, quantity: aiItem.quantity, action: null, price: menuItem.price } : null;
         }).filter(Boolean);
         if (extracted.length === 0) {
           console.log('[WA] No items extracted after Gemini, replying fallback.');
@@ -239,6 +285,33 @@ export async function handleIncomingMessage(msg, client) {
         }
       }
       let items = draft.extraData?.items || [];
+      // --- Robust replace intent detection and confirmation ---
+      if (detectReplaceIntent(messageContent) && items.length > 0) {
+        // Compare by normalized name if IDs are missing
+        const normalize = str => str.toLowerCase().replace(/\s+/g, '');
+        const extractedNames = extracted.map(i => normalize(i.itemName)).sort().join(',');
+        const currentNames = items.map(i => normalize(i.itemName)).sort().join(',');
+        if (extractedNames !== currentNames) {
+          // Log and ask for confirmation before replacing
+          const summary = extracted.map(i => `${i.itemName} x${i.quantity}`).join(', ');
+          console.log('[WA] Replace intent detected, asking for confirmation:', summary);
+          await updateDraft(draft.id, { extraData: { ...draft.extraData, pendingAction: 'replace', proposedItems: extracted } });
+          await msg.reply(`¿Querés que quite los otros ítems y deje solo ${summary} en tu pedido? Responde SÍ para confirmar o NO para mantener el pedido anterior.`);
+          return;
+        }
+      }
+      // --- Smarter remove intent detection ---
+      if (isRemoveIntent(messageContent) && extracted.length > 0 && draft.extraData?.items?.length > 0) {
+        // Find which items to remove
+        const items = draft.extraData.items;
+        const toRemove = items.filter(i => extracted.some(e => e.itemId === i.itemId));
+        if (toRemove.length > 0) {
+          const summary = toRemove.map(i => `${i.itemName} x${i.quantity}`).join(', ');
+          await updateDraft(draft.id, { extraData: { ...draft.extraData, pendingAction: 'remove', proposedItems: toRemove } });
+          await msg.reply(`¿Seguro que querés quitar ${summary} del pedido? Responde SÍ para confirmar o NO para mantener el pedido anterior.`);
+          return;
+        }
+      }
       let needsQuantityPrompt = false;
       let quantityPrompt = '';
       let clarificationPrompt = '';
