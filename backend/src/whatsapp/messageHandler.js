@@ -265,13 +265,12 @@ export async function handleIncomingMessage(msg, client) {
       }
       let extracted = extractOrderItemsAndQuantities(messageContent, menuItems);
       console.log('[WA] extractOrderItemsAndQuantities result:', extracted);
-      // --- Handle generic item requests with multiple variants ---
+      // --- 20/10 UX: Handle generic or ambiguous item requests ---
       if (extracted.length === 0) {
         // Try to find a generic word in the message that matches multiple menu items
         const words = messageContent.toLowerCase().split(/\s|,|\./).filter(Boolean);
         let genericMatches = [];
         for (const word of words) {
-          // Find all menu items that include this word (singular/plural)
           const baseWord = word.replace(/s$/, '');
           const matches = menuItems.filter(i => i.name.toLowerCase().includes(baseWord));
           if (matches.length > 1) {
@@ -281,9 +280,29 @@ export async function handleIncomingMessage(msg, client) {
         }
         if (genericMatches.length > 1) {
           const options = genericMatches.map(i => i.name).join(', ');
+          console.log('[WA] Ambiguous/generic request, asking for clarification:', options);
           await msg.reply(`¿De qué tipo de ${genericMatches[0].name.split(' ')[0].toLowerCase()} querés? Tenemos: ${options}.`);
           return;
         }
+        // If no match, suggest the 3 most similar menu items
+        const suggestions = menuItems
+          .map(i => ({
+            item: i,
+            score: (i.name && i.name.toLowerCase().split(' ').some(w => words.includes(w))) ? 1 : 0
+          }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3)
+          .map(s => s.item.name);
+        if (suggestions.length > 0) {
+          console.log('[WA] No clear match, suggesting:', suggestions);
+          await msg.reply(`No entendí bien tu pedido. ¿Te referías a alguno de estos?
+${suggestions.map((n, i) => `${i + 1}. ${n}`).join('\n')}
+Por favor, respondé con el número o el nombre completo.`);
+          return;
+        }
+        // Fallback: friendly message
+        await msg.reply('No pude identificar productos en tu mensaje. ¿Qué te gustaría pedir?');
+        return;
       }
       // --- Detect 'mejor quiero', 'prefiero', etc. as replace intent ---
       const replacePhrases = ['mejor quiero', 'prefiero', 'cambio a', 'cambiá a', 'cambia a', 'mejor pedí', 'mejor pido'];
