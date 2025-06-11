@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Plus, Minus, ShoppingCart, X } from 'lucide-react';
+import { Loader2, Plus, Minus, ShoppingCart, X, MapPin } from 'lucide-react';
 
 const Menu = () => {
   const [menuData, setMenuData] = useState(null);
   const [cart, setCart] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [deliveryAddress, setDeliveryAddress] = useState('');
 
   // Get phone from URL params
   const urlParams = new URLSearchParams(window.location.search);
@@ -27,15 +28,22 @@ const Menu = () => {
         return;
       }
 
-      const response = await fetch(`/api/menu/data?phone=${customerPhone}`);
-      const data = await response.json();
-
+      // Use relative path - Vite proxy will handle redirecting to backend
+      const apiUrl = `/api/menu/data?phone=${customerPhone}`;
+      console.log('Making API call to:', apiUrl);
+      
+      const response = await fetch(apiUrl);
+      
       if (!response.ok) {
-        throw new Error(data.error || 'Error loading menu');
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+      
+      const data = await response.json();
+      console.log('API response:', data);
 
       setMenuData(data);
     } catch (err) {
+      console.error('Error loading menu:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -70,40 +78,71 @@ const Menu = () => {
   const sendToWhatsApp = () => {
     const cartItems = Object.entries(cart);
     if (cartItems.length === 0) {
-      alert('Add products to your order first 😊');
+      alert('Agregá productos a tu pedido primero 😊');
       return;
     }
 
-    // Generate formatted message
-    let message = `🛒 *My Order - ${menuData.restaurant.name}*\n\n`;
-    let totalPrice = 0;
+    if (!deliveryAddress.trim()) {
+      alert('Por favor, ingresá tu dirección de entrega 📍');
+      return;
+    }
 
+    // Group items by category for better formatting
+    const itemsByCategory = {};
     cartItems.forEach(([productId, quantity]) => {
       const product = menuData.menu.find(p => p.id == productId);
       if (product) {
-        const subtotal = product.price * quantity;
-        totalPrice += subtotal;
-        const emoji = getProductEmoji(product.name, product.category);
-        message += `${emoji} *${product.name}* - Quantity: ${quantity} - Price: $${subtotal.toLocaleString()}\n`;
+        const category = product.category || 'Otros';
+        if (!itemsByCategory[category]) {
+          itemsByCategory[category] = [];
+        }
+        itemsByCategory[category].push({
+          name: product.name,
+          quantity,
+          price: product.price,
+          subtotal: product.price * quantity,
+          emoji: getProductEmoji(product.name, product.category)
+        });
       }
     });
 
-    message += `\n💰 *Total: $${totalPrice.toLocaleString()}*\n\n`;
-    message += 'Please confirm my order and let me know the delivery time 🚀';
+    // Generate formatted message in Spanish
+    let message = `🛒 *MI PEDIDO - ${menuData.restaurant.name}*\n\n`;
+    
+    let totalPrice = 0;
 
-    // Open WhatsApp
-    const phoneNumber = menuData.restaurant.phone;
+    // Add items by category
+    Object.entries(itemsByCategory).forEach(([category, items]) => {
+      message += `📋 *${category.toUpperCase()}*\n`;
+      items.forEach(item => {
+        message += `${item.emoji} ${item.name} x${item.quantity} - $${item.subtotal.toFixed(2)}\n`;
+        totalPrice += item.subtotal;
+      });
+      message += '\n';
+    });
+
+    message += `💰 *TOTAL: $${totalPrice.toFixed(2)}*\n\n`;
+    message += `📍 *DIRECCIÓN DE ENTREGA:*\n${deliveryAddress}\n\n`;
+    message += `✅ *Para confirmar este pedido, escribí:* CONFIRMAR\n`;
+    message += `❌ *Para cancelar, escribí:* CANCELAR\n\n`;
+    message += `📞 Cualquier consulta sobre tiempos o zonas, preguntame! 🚀`;
+
+    // Open WhatsApp - clean phone number from @c.us suffix
+    const cleanPhone = customerPhone.replace('@c.us', '');
     const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
-    window.open(whatsappUrl, '_self');
+    const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
+    window.open(whatsappUrl, '_blank');
   };
 
   const getProductEmoji = (name, category) => {
     const nameLC = name.toLowerCase();
     if (nameLC.includes('empanada')) return '🥟';
     if (nameLC.includes('pizza')) return '🍕';
-    if (nameLC.includes('hamburger')) return '🍔';
-    if (nameLC.includes('drink') || nameLC.includes('coke')) return '🥤';
+    if (nameLC.includes('hamburguesa') || nameLC.includes('burger')) return '🍔';
+    if (nameLC.includes('bebida') || nameLC.includes('gaseosa') || nameLC.includes('drink')) return '🥤';
+    if (nameLC.includes('ensalada')) return '🥗';
+    if (nameLC.includes('postre')) return '🍰';
+    if (nameLC.includes('cafe') || nameLC.includes('café')) return '☕';
     return '🍽️';
   };
 
@@ -112,7 +151,7 @@ const Menu = () => {
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <Loader2 className="mx-auto h-8 w-8 animate-spin mb-4" />
-          <p>Loading menu...</p>
+          <p>Cargando menú...</p>
         </div>
       </div>
     );
@@ -139,7 +178,7 @@ const Menu = () => {
           <CardContent className="text-center p-6">
             <div className="text-4xl mb-4">🔒</div>
             <h2 className="text-xl font-semibold mb-2">{menuData.restaurant.name}</h2>
-            <p className="text-red-600 font-medium mb-4">Currently Closed</p>
+            <p className="text-red-600 font-medium mb-4">Cerrado en este momento</p>
             <p className="text-gray-600">{menuData.restaurant.outOfHoursMessage}</p>
           </CardContent>
         </Card>
@@ -149,7 +188,7 @@ const Menu = () => {
 
   // Group products by category
   const categories = menuData.menu.reduce((acc, item) => {
-    const category = item.category || 'others';
+    const category = item.category || 'Otros';
     if (!acc[category]) acc[category] = [];
     acc[category].push(item);
     return acc;
@@ -159,115 +198,194 @@ const Menu = () => {
     <div className="min-h-screen bg-gradient-to-br from-orange-400 to-red-600">
       {/* Header */}
       <div className="bg-white shadow-lg sticky top-0 z-40">
-        <div className="max-w-md mx-auto p-4">
+        <div className="max-w-6xl mx-auto p-4">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-800">
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-800">
               🍕 {menuData.restaurant.name}
             </h1>
-            <p className="text-gray-600">Select your favorite products</p>
+            <p className="text-gray-600">Seleccioná tus productos favoritos</p>
             <div className="mt-2 flex justify-center items-center space-x-2">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-sm text-green-600 font-medium">Open now</span>
+              <span className="text-sm text-green-600 font-medium">Abierto ahora</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Menu Content */}
-      <div className="max-w-md mx-auto bg-white min-h-screen">
-        <div className="p-4 space-y-6">
-          {Object.entries(categories).map(([category, items]) => (
-            <div key={category}>
-              <h2 className="text-xl font-bold text-gray-800 mb-3 flex items-center">
-                <span>{category === 'others' ? '🍽️ Products' : `🍕 ${category}`}</span>
-                <Badge variant="secondary" className="ml-2">
-                  {items.length}
-                </Badge>
-              </h2>
-              <div className="space-y-3">
-                {items.map((item) => {
-                  const quantity = cart[item.id] || 0;
-                  const emoji = getProductEmoji(item.name, item.category);
-                  return (
-                    <Card key={item.id} className="hover:shadow-md transition-shadow">
-                      <CardContent className="p-4">
-                        <div className="flex items-center space-x-4">
-                          <div className="text-3xl">{emoji}</div>
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-gray-800">{item.name}</h3>
-                            {item.description && (
-                              <p className="text-sm text-gray-600">{item.description}</p>
-                            )}
-                            <p className="text-lg font-bold text-green-600">
-                              ${item.price.toLocaleString()}
-                            </p>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => updateQuantity(item.id, -1)}
-                              disabled={quantity === 0}
-                              className="h-8 w-8 p-0"
-                            >
-                              <Minus className="h-4 w-4" />
-                            </Button>
-                            <span className="w-8 text-center font-semibold">{quantity}</span>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => updateQuantity(item.id, 1)}
-                              className="h-8 w-8 p-0"
-                            >
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-        {/* Bottom spacing for fixed cart */}
-        <div className="h-32"></div>
-      </div>
-
-      {/* Fixed Cart */}
-      {getCartItemCount() > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg z-50">
-          <div className="max-w-md mx-auto p-4">
-            <div className="flex justify-between items-center mb-3">
-              <div>
-                <span className="font-bold text-lg">
-                  Total: ${getCartTotal().toLocaleString()}
-                </span>
-                <div className="text-sm text-gray-600">
-                  {getCartItemCount()} products
+      {/* Main Content - Responsive Layout */}
+      <div className="max-w-6xl mx-auto p-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Menu Section - Takes 2 columns on large screens */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg shadow-md">
+              <div className="p-6">
+                <h2 className="text-xl font-bold text-gray-800 mb-6">📋 Nuestro Menú</h2>
+                
+                {/* Categories Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {Object.entries(categories).map(([category, items]) => (
+                    <div key={category} className="space-y-4">
+                      <div className="flex items-center space-x-2 border-b border-gray-200 pb-2">
+                        <h3 className="text-lg font-semibold text-gray-800">
+                          {category === 'Otros' ? '🍽️ Otros' : `${getProductEmoji(items[0].name, category)} ${category}`}
+                        </h3>
+                        <Badge variant="secondary">
+                          {items.length}
+                        </Badge>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        {items.map((item) => {
+                          const quantity = cart[item.id] || 0;
+                          const emoji = getProductEmoji(item.name, item.category);
+                          return (
+                            <Card key={item.id} className="hover:shadow-md transition-shadow">
+                              <CardContent className="p-4">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center space-x-2 mb-1">
+                                      <span className="text-lg">{emoji}</span>
+                                      <h4 className="font-semibold text-gray-800">{item.name}</h4>
+                                    </div>
+                                    {item.description && (
+                                      <p className="text-sm text-gray-600 mb-2">{item.description}</p>
+                                    )}
+                                    <p className="text-lg font-bold text-green-600">
+                                      ${item.price.toFixed(2)}
+                                    </p>
+                                  </div>
+                                  
+                                  <div className="flex items-center space-x-2 ml-4">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => updateQuantity(item.id, -1)}
+                                      disabled={quantity === 0}
+                                      className="h-8 w-8 p-0"
+                                    >
+                                      <Minus className="h-4 w-4" />
+                                    </Button>
+                                    <span className="w-8 text-center font-semibold text-lg">{quantity}</span>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => updateQuantity(item.id, 1)}
+                                      className="h-8 w-8 p-0"
+                                    >
+                                      <Plus className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setCart({})}
-                className="text-red-500 hover:text-red-700"
-              >
-                Clear
-              </Button>
             </div>
-            <Button
-              onClick={sendToWhatsApp}
-              className="w-full bg-green-500 hover:bg-green-600 text-white"
-              size="lg"
-            >
-              <ShoppingCart className="mr-2 h-4 w-4" />
-              Send Order via WhatsApp
-            </Button>
+          </div>
+
+          {/* Cart Section - Takes 1 column on large screens, sticky */}
+          <div className="lg:col-span-1">
+            <div className="sticky top-24">
+              <Card className="bg-white shadow-lg">
+                <CardContent className="p-6">
+                  <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                    <ShoppingCart className="mr-2 h-5 w-5" />
+                    Tu Pedido
+                  </h3>
+                  
+                  {getCartItemCount() === 0 ? (
+                    <p className="text-gray-500 text-center py-8">
+                      Tu carrito está vacío.<br />
+                      ¡Agregá productos del menú!
+                    </p>
+                  ) : (
+                    <>
+                      {/* Cart Items */}
+                      <div className="space-y-3 mb-4 max-h-60 overflow-y-auto">
+                        {Object.entries(cart).map(([productId, quantity]) => {
+                          const product = menuData.menu.find(p => p.id == productId);
+                          if (!product) return null;
+                          
+                          const emoji = getProductEmoji(product.name, product.category);
+                          return (
+                            <div key={productId} className="flex items-center justify-between text-sm border-b border-gray-100 pb-2">
+                              <div className="flex-1">
+                                <span className="mr-1">{emoji}</span>
+                                <span className="font-medium">{product.name}</span>
+                                <div className="text-gray-500">
+                                  {quantity} x ${product.price.toFixed(2)}
+                                </div>
+                              </div>
+                              <span className="font-semibold">
+                                ${(product.price * quantity).toFixed(2)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      
+                      {/* Delivery Address */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          <MapPin className="inline h-4 w-4 mr-1" />
+                          Dirección de entrega *
+                        </label>
+                        <textarea
+                          value={deliveryAddress}
+                          onChange={(e) => setDeliveryAddress(e.target.value)}
+                          placeholder="Ingresá tu dirección completa..."
+                          className="w-full p-3 border border-gray-300 rounded-md resize-none"
+                          rows="3"
+                          required
+                        />
+                      </div>
+                      
+                      {/* Total */}
+                      <div className="border-t border-gray-200 pt-4">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="font-bold text-lg">Total:</span>
+                          <span className="font-bold text-xl text-green-600">
+                            ${getCartTotal().toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="text-sm text-gray-600 mb-4">
+                          {getCartItemCount()} productos
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setCart({})}
+                            className="w-full text-red-500 hover:text-red-700 hover:bg-red-50"
+                          >
+                            Vaciar carrito
+                          </Button>
+                          
+                          <Button
+                            onClick={sendToWhatsApp}
+                            className="w-full bg-green-500 hover:bg-green-600 text-white"
+                            size="lg"
+                          >
+                            <ShoppingCart className="mr-2 h-4 w-4" />
+                            Enviar Pedido por WhatsApp
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 };

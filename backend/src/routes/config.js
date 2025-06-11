@@ -13,6 +13,7 @@ function normalizeConfig(config) {
     openingHours: typeof config.openingHours === 'string' ? JSON.parse(config.openingHours) : config.openingHours,
     deliveryZones: typeof config.deliveryZones === 'string' ? JSON.parse(config.deliveryZones) : config.deliveryZones,
     preparationTimes: typeof config.preparationTimes === 'string' ? JSON.parse(config.preparationTimes) : config.preparationTimes,
+    autoResponses: typeof config.autoResponses === 'string' ? JSON.parse(config.autoResponses) : (config.autoResponses || {}),
     bannedNumbers: config.bannedNumbers || [],
     escalationKeywords: config.escalationKeywords || [],
     filterKeywords: config.filterKeywords || [],
@@ -51,6 +52,8 @@ router.put('/', adminAuth, async (req, res) => {
     if (data.openingHours && typeof data.openingHours !== 'string') data.openingHours = JSON.stringify(data.openingHours);
     if (data.deliveryZones && typeof data.deliveryZones !== 'string') data.deliveryZones = JSON.stringify(data.deliveryZones);
     if (data.preparationTimes && typeof data.preparationTimes !== 'string') data.preparationTimes = JSON.stringify(data.preparationTimes);
+    // Handle autoResponses as JSON
+    if (data.autoResponses && typeof data.autoResponses !== 'string') data.autoResponses = JSON.stringify(data.autoResponses);
     // Arrays
     if (data.bannedNumbers && !Array.isArray(data.bannedNumbers)) data.bannedNumbers = [];
     if (data.escalationKeywords && !Array.isArray(data.escalationKeywords)) data.escalationKeywords = [];

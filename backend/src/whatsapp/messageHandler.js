@@ -1,32 +1,133 @@
-import { messageFilter } from '../services/contentFilter.js';
-import { processWithGemini } from '../services/gemini.js';
-import { rateLimiter } from '../services/rateLimiter.js';
-import { escalationDetector } from '../services/escalationDetector.js';
-import prisma from '../utils/database.js';
-import { findBestMenuMatch } from '../services/gemini.js';
-import {
-  getOrCreateDraft,
-  updateDraft,
-  finalizeDraft,
-  deleteDraft,
-  getDraftByConversationId
-} from '../services/orderDraftService.js';
-import {
-  extractOrderItemsAndQuantities,
-  isOrderConfirmation,
-  isOrderCancellation,
-  isQuantityOnlyMessage,
-  isAddIntent,
-  isRemoveIntent,
-  detectReplaceIntent
-} from '../utils/validators.js';
-import { extractOrderWithGemini } from '../services/gemini.js';
-import AIRouter from '../services/aiRouter.js';
+import { PrismaClient } from '@prisma/client';
+import IntelligentOrderProcessor from '../services/intelligentOrderProcessor.js';
 
 const APP_URL = process.env.APP_URL && process.env.APP_URL !== '' ? process.env.APP_URL : 'http://localhost:5173';
-const aiRouter = new AIRouter();
+const prisma = new PrismaClient();
 
-// Helper to get customer type
+// Initialize the intelligent processor
+const intelligentProcessor = new IntelligentOrderProcessor();
+
+// Helper to get or create restaurant config
+async function getOrCreateConfig() {
+  try {
+    console.log('🔍 Looking for existing RestaurantConfig...');
+    let config = await prisma.restaurantConfig.findFirst();
+    
+    if (config) {
+      console.log('✅ Found existing config:', config.restaurantName);
+      return config;
+    }
+    
+    console.log('❌ No config found, creating default...');
+    // Create default config if none exists
+    config = await prisma.restaurantConfig.create({
+      data: {
+        isOpen: true,
+        openingHours: {
+          monday: { open: "18:00", close: "23:00" },
+          tuesday: { open: "18:00", close: "23:00" },
+          wednesday: { open: "18:00", close: "23:00" },
+          thursday: { open: "18:00", close: "23:00" },
+          friday: { open: "18:00", close: "23:00" },
+          saturday: { open: "18:00", close: "23:00" },
+          sunday: { open: "18:00", close: "23:00" }
+        },
+        menuItems: [
+          { id: "1", name: "Empanada de carne", price: 7, category: "Empanadas" },
+          { id: "2", name: "Empanada de pollo", price: 7, category: "Empanadas" }
+        ],
+        deliveryZones: {
+          "Centro": { price: 500, timeMinutes: 30 },
+          "Barrio Norte": { price: 800, timeMinutes: 45 }
+        },
+        preparationTimes: {
+          "Empanadas": 15,
+          "Pizzas": 25,
+          "Bebidas": 2
+        },
+        maxMessagesPerHour: 10,
+        escalationKeywords: ["humano", "gerente", "problema"],
+        autoResponses: {},
+        filterKeywords: ["politica", "deporte", "clima"],
+        restaurantName: "Ordenalo Restaurant",
+        orderMethod: "whatsapp",
+        botTone: "argentino_amigable",
+        unrelatedMessage: "Disculpa, solo puedo ayudarte con pedidos del restaurante. ¿Qué te gustaría ordenar?",
+        bannedNumbers: [],
+        outOfHoursMessage: "Estamos cerrados en este momento. Abrimos de 18:00 a 23:00hs.",
+        enableReorderOption: true,
+        maxReorderDays: 30,
+        welcomeBackMessage: "¡Hola de nuevo!",
+        firstTimeMessage: "¡Bienvenido!"
+      }
+    });
+    console.log('✅ Created new config:', config.restaurantName);
+    
+    return config;
+  } catch (error) {
+    console.error('❌ Error getting/creating config:', error);
+    // Return minimal default config to prevent crashes
+    return {
+      restaurantName: "Nuestro Restaurante",
+      menuItems: [
+        { id: "1", name: "Empanada de carne", price: 7, category: "Empanadas" },
+        { id: "2", name: "Empanada de pollo", price: 7, category: "Empanadas" }
+      ],
+      isOpen: true
+    };
+  }
+}
+
+// Helper to check if customer session should restart (15 minutes of inactivity)
+async function shouldRestartSession(phoneNumber) {
+  try {
+    const conversation = await prisma.conversation.findFirst({
+      where: { phoneNumber },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        messages: {
+          take: 1,
+          orderBy: { timestamp: 'desc' }
+        }
+      }
+    });
+
+    if (!conversation || !conversation.messages.length) {
+      return true; // New customer or no messages
+    }
+
+    const lastMessage = conversation.messages[0];
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    
+    return lastMessage.timestamp < fifteenMinutesAgo;
+  } catch (error) {
+    console.error('Error checking session restart:', error);
+    return false; // Don't restart on error, continue conversation
+  }
+}
+
+// Helper to clear pending order drafts when session restarts
+async function clearPendingOrderDrafts(phoneNumber) {
+  try {
+    const conversation = await prisma.conversation.findFirst({
+      where: { phoneNumber },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    if (conversation) {
+      await prisma.orderDraft.deleteMany({
+        where: {
+          conversationId: conversation.id,
+          status: 'IN_PROGRESS'
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error clearing order drafts:', error);
+  }
+}
+
+// Helper to get customer type for personalized greetings
 async function getCustomerType(phoneNumber) {
   const customer = await prisma.customerProfile.findUnique({ where: { phoneNumber } });
   if (!customer || customer.orderCount === 0) return 'NEW_CUSTOMER';
@@ -38,223 +139,270 @@ async function getCustomerType(phoneNumber) {
   return 'DORMANT_CUSTOMER';
 }
 
-// Helper to generate personalized greeting/options
-async function generateOrderOptions(phoneNumber) {
-  const customerType = await getCustomerType(phoneNumber);
-  const customer = await prisma.customerProfile.findUnique({ where: { phoneNumber } });
-  const config = await prisma.restaurantConfig.findFirst();
-  const menuLink = `${APP_URL}/menu?phone=${phoneNumber}`;
-  switch (customerType) {
-    case 'NEW_CUSTOMER':
-      return `¡Bienvenido a ${config.restaurantName || 'nuestro restaurante'}! ¿Cómo prefieres ordenar?\n\n📱 Menú digital: ${menuLink}\n💬 Decime qué quieres\n\n💡 Tip: El menú digital es más fácil con fotos 😊`;
-    case 'RETURNING_CUSTOMER': {
-      // Get last order summary
-      let lastOrder = null;
-      if (customer?.lastOrderId) {
-        lastOrder = await prisma.order.findUnique({ where: { id: customer.lastOrderId } });
+// Helper to detect greeting messages
+function isGreeting(message) {
+  const lower = message.trim().toLowerCase();
+  const greetings = [
+    'hola', 'buenas', 'buenos dias', 'buenas tardes', 'buenas noches', 
+    'hello', 'hi', 'saludos', 'holi', 'holis', 'qué tal', 'que tal', 
+    'quiero hacer un pedido', 'buen día', 'buen dia'
+  ];
+  return greetings.some(greet => lower.startsWith(greet));
+}
+
+// Helper to handle personalized greetings
+async function handleGreeting(phoneNumber) {
+  try {
+    const customerType = await getCustomerType(phoneNumber);
+    const customer = await prisma.customerProfile.findUnique({ where: { phoneNumber } });
+    const config = await getOrCreateConfig(); // Use the safe config getter
+    const menuLink = `${APP_URL}/menu?phone=${phoneNumber}`;
+    
+    // Clear any pending drafts when greeting (session restart)
+    await clearPendingOrderDrafts(phoneNumber);
+    
+    switch (customerType) {
+      case 'NEW_CUSTOMER':
+        return `¡Hola! 👋 Bienvenido a *${config.restaurantName}* 🇦🇷
+
+Podés pedir de dos formas:
+
+1️⃣ *Por chat*: Decime qué querés y te ayudo a armar el pedido.
+2️⃣ *Por link*: Mirá el menú digital y pedí directo acá:
+${menuLink}
+
+¿Qué te gustaría pedir hoy?`;
+
+      case 'RETURNING_CUSTOMER': {
+        let lastOrder = null;
+        if (customer?.lastOrderId) {
+          lastOrder = await prisma.order.findUnique({ where: { id: customer.lastOrderId } });
+        }
+        let lastOrderSummary = '';
+        if (lastOrder) {
+          const items = Array.isArray(lastOrder.items) ? lastOrder.items : [];
+          lastOrderSummary = items.map(i => `${i.quantity}x ${i.name || i.itemName}`).join(' + ');
+        }
+        return `¡Hola de nuevo! 😊 Bienvenido a *${config.restaurantName}*
+
+¿Cómo querés ordenar hoy?
+
+🔄 Repetir tu último pedido${lastOrderSummary ? ` (${lastOrderSummary})` : ''}
+📱 Menú digital: ${menuLink}
+💬 Decime algo nuevo
+
+¿Qué prefieres?`;
       }
-      let lastOrderSummary = '';
-      if (lastOrder) {
-        const items = Array.isArray(lastOrder.items) ? lastOrder.items : [];
-        lastOrderSummary = items.map(i => `${i.quantity}x ${i.name || i.itemName}`).join(' + ');
+
+      case 'VIP_CUSTOMER': {
+        let lastOrder = null;
+        if (customer?.lastOrderId) {
+          lastOrder = await prisma.order.findUnique({ where: { id: customer.lastOrderId } });
+        }
+        let lastOrderSummary = '';
+        if (lastOrder) {
+          const items = Array.isArray(lastOrder.items) ? lastOrder.items : [];
+          lastOrderSummary = items.map(i => `${i.quantity}x ${i.name || i.itemName}`).join(' + ');
+        }
+        const favorites = (customer?.favoriteItems || []).slice(0, 3).join(', ');
+        return `¡Hola${customer?.name ? ' ' + customer.name : ''}! 🌟 Bienvenido a *${config.restaurantName}*
+
+🔄 Lo de siempre${lastOrderSummary ? ` (${lastOrderSummary})` : ''}
+⭐ Tus favoritos: ${favorites || 'Sin favoritos aún'}
+📱 Menú completo: ${menuLink}
+💬 Algo diferente hoy
+
+¿Qué te provoca? 😋`;
       }
-      return `¡Hola de nuevo! 😊 ¿Cómo quieres ordenar hoy?\n\n🔄 Repetir tu último pedido${lastOrderSummary ? ` (${lastOrderSummary} - $${lastOrder?.totalAmount || ''})` : ''}\n📱 Menú digital: ${menuLink}\n💬 Decime algo nuevo\n\n¿Qué prefieres?`;
+
+      default:
+        return `¡Hola! Bienvenido a *${config.restaurantName}* 
+
+¿Qué te gustaría pedir hoy?
+
+📱 Menú digital: ${menuLink}
+💬 Decime qué querés`;
     }
-    case 'VIP_CUSTOMER': {
-      // Get last order and favorites
-      let lastOrder = null;
-      if (customer?.lastOrderId) {
-        lastOrder = await prisma.order.findUnique({ where: { id: customer.lastOrderId } });
-      }
-      let lastOrderSummary = '';
-      if (lastOrder) {
-        const items = Array.isArray(lastOrder.items) ? lastOrder.items : [];
-        lastOrderSummary = items.map(i => `${i.quantity}x ${i.name || i.itemName}`).join(' + ');
-      }
-      const favorites = (customer?.favoriteItems || []).slice(0, 3).join(', ');
-      return `¡Hola${customer?.name ? ' ' + customer.name : ''}! 🌟\n\n🔄 Lo de siempre${lastOrderSummary ? ` (${lastOrderSummary})` : ''}\n⭐ Tus favoritos: ${favorites || 'Sin favoritos aún'}\n📱 Menú completo: ${menuLink}\n💬 Algo diferente hoy\n\n¿Qué te provoca? 😋`;
-    }
-    default:
-      return `¡Hola! ¿Qué te gustaría pedir hoy?\n\n📱 Menú digital: ${menuLink}\n💬 Decime qué quieres`;
+  } catch (error) {
+    console.error('Error handling greeting:', error);
+    return '¡Hola! ¿En qué te puedo ayudar hoy?';
   }
 }
 
-// Main function to handle incoming WhatsApp messages
-export async function handleIncomingMessage(msg, client) {
+// Helper to get menu items from config
+async function getMenuItems() {
   try {
-    const phoneNumber = msg.from;
-    const messageContent = msg.body;
-    console.log(`[HANDLER] Message from ${phoneNumber}: ${messageContent}`);
-
-    // Fetch config for banned numbers and open status
-    const config = await prisma.restaurantConfig.findFirst();
-    if (config?.bannedNumbers?.includes(phoneNumber)) {
-      await msg.reply('No tienes permiso para interactuar con este restaurante.');
-      return;
-    }
-
-    // Check if restaurant is open
-    if (config && !config.isOpen) {
-      await msg.reply(config.outOfHoursMessage || 'El restaurante está cerrado en este momento.');
-      return;
-    }
-
-    // Rate limiting per phone number
-    const allowed = await rateLimiter.check(phoneNumber);
-    if (!allowed) {
-      await msg.reply('Has superado el límite de mensajes. Por favor, intenta más tarde.');
-      return;
-    }
-
-    // Prepare menuItems ONCE for the whole handler
-    let menuItems = config.menuItems;
+    const config = await getOrCreateConfig(); // Use the safe config getter
+    let menuItems = config?.menuItems;
+    
+    if (!menuItems) return [];
+    
     if (!Array.isArray(menuItems)) {
       if (typeof menuItems === 'string') {
-        try { menuItems = JSON.parse(menuItems); } catch { menuItems = []; }
+        try { 
+          menuItems = JSON.parse(menuItems); 
+        } catch { 
+          menuItems = []; 
+        }
       } else if (typeof menuItems === 'object' && menuItems !== null) {
-        menuItems = Object.values(menuItems).every(i => typeof i === 'object' && i.name) ? Object.values(menuItems) : [];
+        menuItems = Object.values(menuItems).every(i => typeof i === 'object' && i.name) 
+          ? Object.values(menuItems) 
+          : [];
       } else {
         menuItems = [];
       }
     }
-    console.log('[WA] Loaded menu items:', menuItems);
-
-    // Get or create conversation
-    let conversation = await prisma.conversation.findFirst({ where: { phoneNumber }, orderBy: { createdAt: 'desc' } });
-    if (!conversation) {
-      conversation = await prisma.conversation.create({ data: { phoneNumber } });
-    }
-
-    // Process with AI Router
-    const aiResponse = await aiRouter.processMessage(
-      messageContent,
-      phoneNumber,
-      menuItems
-    );
-    console.log(`[HANDLER] AI Response:`, aiResponse);
-
-    // Handle escalation if needed
-    if (aiResponse.needsHuman) {
-      await escalateToHuman(conversation.id, messageContent, aiResponse);
-      await msg.reply(aiResponse.response + "\n\n🤝 He notificado a nuestro equipo para mejor asistencia.");
-      return;
-    }
-
-    // Save interaction to database
-    await saveInteraction(conversation.id, messageContent, aiResponse);
-
-    // Handle order items if extracted
-    if (aiResponse.intent === 'order' && aiResponse.items && aiResponse.items.length > 0) {
-      await handleOrderItems(conversation.id, aiResponse.items);
-      // Build order confirmation
-      const confirmation = await buildOrderConfirmation(aiResponse.items, menuItems);
-      await msg.reply(confirmation);
-      return;
-    }
-
-    await msg.reply(aiResponse.response);
-    return;
+    
+    return menuItems;
   } catch (error) {
-    console.error('[HANDLER] Error:', error);
-    // Fallback to your existing Gemini function
-    try {
-      const { processWithGemini } = await import('../services/gemini.js');
-      const fallback = await processWithGemini(msg.body, msg.from);
-      await msg.reply(fallback);
-    } catch (fallbackError) {
-      console.error('[HANDLER] Fallback error:', fallbackError);
-      await msg.reply('Disculpa, estoy teniendo problemas técnicos. ¿Puedes intentar en unos minutos? 🔧');
-    }
+    console.error('Error getting menu items:', error);
+    return [];
   }
 }
 
-// Escalation helper
-async function escalateToHuman(conversationId, message, aiResponse) {
+// Helper to save interaction for analytics
+async function saveInteraction(phoneNumber, userMessage, botResponse) {
   try {
-    await prisma.conversation.update({
-      where: { id: conversationId },
-      data: {
-        status: 'WAITING_HUMAN',
-        escalationReason: `AI confidence: ${aiResponse.confidence}, Service: ${aiResponse.aiService}`
-      }
+    // Find or create conversation
+    let conversation = await prisma.conversation.findFirst({
+      where: { phoneNumber },
+      orderBy: { createdAt: 'desc' }
     });
-    console.log(`[ESCALATION] Conversation ${conversationId} escalated. Reason: Low confidence`);
-    // TODO: Add webhook notification to admin if needed
-  } catch (error) {
-    console.error('[HANDLER] Error escalating:', error);
-  }
-}
+    
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
+        data: { phoneNumber, status: 'BOT_ACTIVE' }
+      });
+    }
 
-// Save interaction helper
-async function saveInteraction(conversationId, userMessage, aiResponse) {
-  try {
+    // Save the interaction
     await prisma.message.create({
       data: {
-        conversationId,
+        conversationId: conversation.id,
         sender: 'BOT',
-        content: aiResponse.response,
+        content: botResponse.response,
         timestamp: new Date(),
         geminiResponse: {
-          aiService: aiResponse.aiService,
-          intent: aiResponse.intent,
-          confidence: aiResponse.confidence,
-          cost: aiResponse.cost || 0,
+          aiService: botResponse.aiService || 'openai_intelligent',
+          intent: botResponse.intent || 'unknown',
+          confidence: botResponse.confidence || 0.9,
           originalMessage: userMessage
         }
       }
     });
   } catch (error) {
-    console.error('[HANDLER] Error saving interaction:', error);
+    console.error('Error saving interaction:', error);
   }
 }
 
-// Handle order items helper
-async function handleOrderItems(conversationId, items) {
+// Helper to update customer profile (using ONLY existing schema fields)
+async function updateCustomerProfile(phoneNumber) {
   try {
-    await prisma.orderDraft.deleteMany({ where: { conversationId } });
-    for (const item of items) {
-      await prisma.orderDraft.create({
-        data: {
-          conversationId,
-          itemName: item.itemName,
-          itemId: item.itemId?.toString(),
-          quantity: item.quantity,
-          status: 'PENDING_CONFIRMATION',
-          extraData: {
-            modifiers: item.modifiers || [],
-            extractedBy: 'ai',
-            confidence: item.confidence || 0.8
-          }
-        }
-      });
-    }
-    console.log(`[HANDLER] Created ${items.length} order drafts`);
+    await prisma.customerProfile.upsert({
+      where: { phoneNumber },
+      update: {
+        updatedAt: new Date() // Only update timestamp using existing field
+      },
+      create: {
+        phoneNumber,
+        orderCount: 0,
+        totalSpent: 0,
+        averageOrderValue: 0,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    });
   } catch (error) {
-    console.error('[HANDLER] Error handling order items:', error);
+    console.error('Error updating customer profile:', error);
   }
 }
 
-// Build order confirmation helper
-async function buildOrderConfirmation(items, menuItems) {
+/**
+ * MAIN MESSAGE HANDLER - NOW WITH INTELLIGENT AI PROCESSING
+ * This replaces the old regex-based system with true natural language understanding
+ */
+export async function handleIncomingMessage(msg, client) {
   try {
-    let response = "✅ Perfecto! Tu pedido:\n\n";
-    let total = 0;
-    for (const item of items) {
-      const menuItem = menuItems.find(m => m.id == item.itemId);
-      if (menuItem) {
-        const subtotal = menuItem.price * item.quantity;
-        total += subtotal;
-        response += `🍽️ ${item.quantity}x ${item.itemName} - $${subtotal.toLocaleString()}\n`;
-        if (item.modifiers && item.modifiers.length > 0) {
-          response += `   📝 ${item.modifiers.join(', ')}\n`;
-        }
+    const phoneNumber = msg.from;
+    const messageContent = msg.body?.trim();
+    
+    console.log(`\n🤖 NEW MESSAGE from ${phoneNumber}: "${messageContent}"`);
+    
+    if (!messageContent) {
+      await msg.reply('No recibí ningún mensaje. ¿Podrías escribir qué querés pedir?');
+      return;
+    }
+
+    // Update customer interaction
+    await updateCustomerProfile(phoneNumber);
+
+    // Check if session should restart due to inactivity (15 minutes)
+    const shouldRestart = await shouldRestartSession(phoneNumber);
+    
+    // Handle greetings with personalized responses OR if session should restart
+    if (isGreeting(messageContent) || shouldRestart) {
+      const greetingResponse = await handleGreeting(phoneNumber);
+      await msg.reply(greetingResponse);
+      
+      await saveInteraction(phoneNumber, messageContent, {
+        response: greetingResponse,
+        intent: shouldRestart ? 'session_restart' : 'greeting',
+        aiService: 'intelligent_simple'
+      });
+      return;
+    }
+
+    // Get menu items for order processing
+    const menuItems = await getMenuItems();
+    
+    if (menuItems.length === 0) {
+      const config = await getOrCreateConfig();
+      await msg.reply(`El menú no está disponible en este momento. Por favor contacta a *${config.restaurantName}* directamente.`);
+      return;
+    }
+
+    console.log(`📋 Loaded ${menuItems.length} menu items`);
+
+    // 🚀 USE THE NEW INTELLIGENT PROCESSOR
+    const response = await intelligentProcessor.processOrder(messageContent, phoneNumber, menuItems);
+    
+    console.log(`🧠 AI Response:`, response);
+
+    // Send response to user
+    await msg.reply(response.response);
+
+    // Save interaction for analytics
+    await saveInteraction(phoneNumber, messageContent, response);
+
+    // If order was confirmed, update customer stats
+    if (response.intent === 'order_confirmed') {
+      try {
+        await prisma.customerProfile.upsert({
+          where: { phoneNumber },
+          update: {
+            orderCount: { increment: 1 },
+            lastOrderDate: new Date()
+          },
+          create: {
+            phoneNumber,
+            orderCount: 1,
+            lastOrderDate: new Date(),
+            totalSpent: 0,
+            averageOrderValue: 0
+          }
+        });
+      } catch (error) {
+        console.error('Error updating customer order stats:', error);
       }
     }
-    response += `\n💰 *Total: $${total.toLocaleString()}*\n\n`;
-    response += "¿Confirmas tu pedido? Responde 'sí' para continuar o 'modificar' para cambiar algo.";
-    return response;
+
   } catch (error) {
-    console.error('[HANDLER] Error building confirmation:', error);
-    return "He procesado tu pedido. ¿Podrías confirmar que está correcto?";
+    console.error('❌ CRITICAL ERROR in message handler:', error);
+    
+    try {
+      await msg.reply('Disculpa, tuve un problema técnico. ¿Podrías intentar de nuevo en un momento? 🔧');
+    } catch (replyError) {
+      console.error('Failed to send error message:', replyError);
+    }
   }
 } 

@@ -227,6 +227,48 @@ function BannedNumbersEditor({ value, onChange }) {
   );
 }
 
+function AutoResponsesEditor({ value, onChange }) {
+  const [responses, setResponses] = useState(value || {});
+  const [newKey, setNewKey] = useState('');
+  const [newValue, setNewValue] = useState('');
+
+  useEffect(() => { onChange(responses); }, [responses]);
+
+  function handleAdd() {
+    if (!newKey.trim() || newKey in responses) return;
+    setResponses({ ...responses, [newKey]: newValue });
+    setNewKey('');
+    setNewValue('');
+  }
+  function handleRemove(key) {
+    const { [key]: _, ...rest } = responses;
+    setResponses(rest);
+  }
+  function handleChange(key, value) {
+    setResponses({ ...responses, [key]: value });
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input className="border rounded px-2 py-1 flex-1" placeholder="Key (e.g. productNotFound)" value={newKey} onChange={e => setNewKey(e.target.value)} />
+        <input className="border rounded px-2 py-1 flex-1" placeholder="Message" value={newValue} onChange={e => setNewValue(e.target.value)} />
+        <button className="bg-green-500 text-white px-3 py-1 rounded" type="button" onClick={handleAdd}>Add</button>
+      </div>
+      <ul className="divide-y">
+        {Object.entries(responses).map(([key, val]) => (
+          <li key={key} className="flex items-center gap-2 py-1">
+            <input className="border rounded px-2 py-1 flex-1" value={key} disabled />
+            <input className="border rounded px-2 py-1 flex-1" value={val} onChange={e => handleChange(key, e.target.value)} />
+            <button className="bg-red-500 text-white px-2 py-1 rounded" type="button" onClick={() => handleRemove(key)}>Remove</button>
+          </li>
+        ))}
+      </ul>
+      <div className="text-xs text-gray-500">These messages are used for bot responses and suggestions. Leave blank to use the default.</div>
+    </div>
+  );
+}
+
 function LoginPage({ onLogin }) {
   const [error, setError] = useState('');
   return (
@@ -404,6 +446,10 @@ function RestaurantConfigPage() {
         <div>
           <label className="block font-medium mb-1">Banned Numbers</label>
           <BannedNumbersEditor value={config.bannedNumbers || []} onChange={val => handleChange('bannedNumbers', val)} />
+        </div>
+        <div>
+          <label className="block font-medium mb-1">Custom Bot Messages (autoResponses)</label>
+          <AutoResponsesEditor value={config.autoResponses || {}} onChange={val => handleChange('autoResponses', val)} />
         </div>
         <button className="bg-blue-600 text-white px-6 py-2 rounded font-semibold" type="submit" disabled={saving}>{saving ? 'Saving...' : 'Save Config'}</button>
       </form>

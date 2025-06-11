@@ -1,8 +1,12 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
+import IntelligentOrderProcessor from '../services/intelligentOrderProcessor.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();
+
+// Initialize the intelligent processor for restaurant status
+const processor = new IntelligentOrderProcessor(process.env.OPENAI_API_KEY);
 
 // Endpoint to serve menu data for the React frontend
 router.get('/data', async (req, res) => {
@@ -24,6 +28,9 @@ router.get('/data', async (req, res) => {
       });
     }
 
+    // Use intelligent restaurant status instead of fixed isOpen field
+    const restaurantStatus = processor.isRestaurantOpen(config);
+
     // Parse menu items from configuration
     let menuItems = [];
     try {
@@ -39,9 +46,9 @@ router.get('/data', async (req, res) => {
     res.json({
       restaurant: {
         name: config.restaurantName || 'Our Restaurant',
-        isOpen: config.isOpen,
+        isOpen: restaurantStatus.open,
         phone: process.env.WHATSAPP_NUMBER,
-        outOfHoursMessage: config.outOfHoursMessage,
+        outOfHoursMessage: restaurantStatus.message || config.outOfHoursMessage,
       },
       menu: menuItems,
       customerPhone: phone,
