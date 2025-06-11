@@ -83,4 +83,16 @@ router.get('/health', (req, res) => {
   });
 });
 
+// Simple test endpoint to verify CORS and basic connectivity
+router.get('/test', (req, res) => {
+  console.log(`🧪 Test endpoint called from origin: ${req.get('Origin')}`);
+  res.json({
+    message: 'Menu API is working!',
+    timestamp: new Date().toISOString(),
+    origin: req.get('Origin'),
+    userAgent: req.get('User-Agent'),
+    success: true
+  });
+});
+
 export default router; 
