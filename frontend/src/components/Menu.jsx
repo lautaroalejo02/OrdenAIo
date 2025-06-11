@@ -4,11 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Plus, Minus, ShoppingCart, X, MapPin } from 'lucide-react';
 
-// API Configuration - ALWAYS use production URL
+// API Configuration - CORRECT Railway backend URL
 const getApiBaseUrl = () => {
-  // HARDCODED - NO MORE LOCALHOST BULLSHIT
-  const url = 'https://ordenalo-production.up.railway.app';
-  console.log('🔥 HARDCODED API URL:', url);
+  // CORRECT Railway backend URL
+  const url = 'https://heartfelt-healing-production-f87a.up.railway.app';
+  console.log('🔥 CORRECT API URL:', url);
   return url;
 };
 
