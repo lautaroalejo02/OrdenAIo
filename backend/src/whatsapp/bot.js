@@ -1,6 +1,7 @@
 console.log('Starting WhatsApp bot...');
 
 import qrcode from 'qrcode';
+import { setClientInstance } from './client.js';
 
 (async () => {
   try {
@@ -17,6 +18,9 @@ import qrcode from 'qrcode';
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       },
     });
+
+    // Register client instance for external use
+    setClientInstance(client);
 
     // Display QR code in terminal for authentication
     client.on('qr', (qr) => {
