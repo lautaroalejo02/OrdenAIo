@@ -557,12 +557,14 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
       return await this.showCurrentOrder(context.phoneNumber);
     }
 
-    // Remove item intents
+    // Remove item intents - DISABLED to use OpenAI intelligent processing
+    /*
     if (text.includes('quita') || text.includes('saca') || text.includes('elimina') || 
         text.includes('borra') || text.includes('remueve') || text.includes('sacame') ||
         text.includes('quitame') || text.includes('eliminame') || text.includes('borrame')) {
       return await this.handleRemoveIntent(text, context.phoneNumber);
     }
+    */
 
     return null; // No simple intent detected
   }
