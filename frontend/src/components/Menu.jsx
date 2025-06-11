@@ -4,6 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Plus, Minus, ShoppingCart, X, MapPin } from 'lucide-react';
 
+// API Configuration - detect environment and use appropriate URL
+const getApiBaseUrl = () => {
+  // If we're in development, use relative paths (proxy will handle it)
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return '';
+  }
+  // In production, use the full backend URL
+  return 'https://ordenalo-production.up.railway.app';
+};
+
 const Menu = () => {
   const [menuData, setMenuData] = useState(null);
   const [cart, setCart] = useState({});
@@ -28,8 +38,9 @@ const Menu = () => {
         return;
       }
 
-      // Use relative path - Vite proxy will handle redirecting to backend
-      const apiUrl = `/api/menu/data?phone=${customerPhone}`;
+      // Use environment-appropriate URL
+      const apiBaseUrl = getApiBaseUrl();
+      const apiUrl = `${apiBaseUrl}/api/menu/data?phone=${customerPhone}`;
       console.log('Making API call to:', apiUrl);
       
       const response = await fetch(apiUrl);
