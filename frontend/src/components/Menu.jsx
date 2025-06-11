@@ -4,19 +4,19 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Plus, Minus, ShoppingCart, X, MapPin } from 'lucide-react';
 
-// API Configuration - Use environment variables when available
+// API Configuration - Smart detection for dev vs production
 const getApiBaseUrl = () => {
-  // Check for environment variable first
-  if (import.meta.env.VITE_API_URL) {
-    console.log('Using VITE_API_URL:', import.meta.env.VITE_API_URL);
-    return import.meta.env.VITE_API_URL;
+  // In development, use relative paths (proxy will handle it)
+  if (import.meta.env.DEV) {
+    console.log('🔧 DEV mode: Using relative API paths');
+    return '';
   }
   
-  // For debugging, let's always use the production URL
-  // This ensures it works on Railway regardless of hostname detection issues
-  console.log('Current hostname:', window.location.hostname);
-  console.log('Using hardcoded production API URL');
-  return 'https://ordenalo-production.up.railway.app';
+  // In production, always use full backend URL
+  const productionUrl = 'https://ordenalo-production.up.railway.app';
+  console.log('🚀 PRODUCTION mode: Using full API URL:', productionUrl);
+  console.log('🏠 Current location:', window.location.href);
+  return productionUrl;
 };
 
 const Menu = () => {

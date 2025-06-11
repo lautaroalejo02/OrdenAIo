@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'url';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   resolve: {
     alias: {
@@ -11,8 +11,16 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: {
-      '/api': 'http://localhost:3000',
-    },
+    // Only use proxy in development mode
+    ...(mode === 'development' && {
+      proxy: {
+        '/api': 'http://localhost:3000',
+      },
+    }),
   },
-}); 
+  // Ensure build works correctly for production
+  build: {
+    outDir: 'dist',
+    assetsDir: 'assets',
+  },
+})); 
