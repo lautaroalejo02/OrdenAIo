@@ -4,19 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Plus, Minus, ShoppingCart, X, MapPin } from 'lucide-react';
 
-// API Configuration - Smart detection for dev vs production
+// API Configuration - ALWAYS use production URL
 const getApiBaseUrl = () => {
-  // In development, use relative paths (proxy will handle it)
-  if (import.meta.env.DEV) {
-    console.log('🔧 DEV mode: Using relative API paths');
-    return '';
-  }
-  
-  // In production, always use full backend URL
-  const productionUrl = 'https://ordenalo-production.up.railway.app';
-  console.log('🚀 PRODUCTION mode: Using full API URL:', productionUrl);
-  console.log('🏠 Current location:', window.location.href);
-  return productionUrl;
+  // HARDCODED - NO MORE LOCALHOST BULLSHIT
+  const url = 'https://ordenalo-production.up.railway.app';
+  console.log('🔥 HARDCODED API URL:', url);
+  return url;
 };
 
 const Menu = () => {
