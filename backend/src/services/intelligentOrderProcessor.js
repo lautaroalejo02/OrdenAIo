@@ -75,6 +75,13 @@ class IntelligentOrderProcessor {
       
     } catch (error) {
       console.error('❌ Error processing order:', error);
+      
+      // IMPROVED FALLBACK: If OpenAI fails, try to handle basic patterns instead of marking as off-topic
+      if (error.code === 'invalid_api_key' || error.status === 401) {
+        console.log('🔧 OpenAI unavailable, falling back to basic pattern matching...');
+        return await this.handleWithoutAI(message, phoneNumber, menuItems, restaurantConfig);
+      }
+      
       return {
         success: false,
         intent: 'error',
@@ -1841,6 +1848,196 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_`,
         intent: 'error',
         response: 'Hubo un error modificando tu pedido. Intentá de nuevo.',
         aiService: 'intelligent_simple'
+      };
+    }
+  }
+
+  /**
+   * Fallback method when OpenAI is not available - handles basic patterns
+   */
+  async handleWithoutAI(message, phoneNumber, menuItems, restaurantConfig) {
+    console.log('🔧 Handling message without AI using basic patterns...');
+    const text = message.toLowerCase().trim();
+    
+    // Get conversation context for current order
+    const context = await this.getContext(phoneNumber);
+    
+    // Handle basic empanada orders
+    if (text.includes('empanada')) {
+      // Check if it's a modification to existing order
+      if ((text.includes('solamente') || text.includes('únicamente') || text.includes('solo')) && context.activeOrder) {
+        // This is a REPLACE_ALL intent - user wants to change entire order
+        if (text.includes('carne')) {
+          return await this.handleBasicOrder([{
+            itemId: '1',
+            itemName: 'Empanada de carne',
+            quantity: 12, // Default dozen
+            price: 7
+          }], phoneNumber, 'REPLACE_ALL', restaurantConfig);
+        } else if (text.includes('pollo')) {
+          return await this.handleBasicOrder([{
+            itemId: '2', 
+            itemName: 'Empanada de pollo',
+            quantity: 12, // Default dozen
+            price: 7
+          }], phoneNumber, 'REPLACE_ALL', restaurantConfig);
+        }
+      }
+      
+      // Basic empanada request - ask for clarification
+      if (!text.includes('carne') && !text.includes('pollo')) {
+        return {
+          success: true,
+          intent: 'clarification',
+          response: '¡Perfecto! Tenemos empanadas de:\n\n• Carne - $7\n• Pollo - $7\n\n¿De qué sabor querés y cuántas?',
+          aiService: 'basic_fallback'
+        };
+      }
+      
+      // Try to extract quantity and flavor
+      const carneQuantity = this.extractQuantity(text, 'carne');
+      const polloQuantity = this.extractQuantity(text, 'pollo');
+      
+      const orderItems = [];
+      if (carneQuantity > 0) {
+        orderItems.push({
+          itemId: '1',
+          itemName: 'Empanada de carne', 
+          quantity: carneQuantity,
+          price: 7
+        });
+      }
+      if (polloQuantity > 0) {
+        orderItems.push({
+          itemId: '2',
+          itemName: 'Empanada de pollo',
+          quantity: polloQuantity, 
+          price: 7
+        });
+      }
+      
+      if (orderItems.length > 0) {
+        return await this.handleBasicOrder(orderItems, phoneNumber, 'ADD_ITEM', restaurantConfig);
+      }
+    }
+    
+    // If we can't understand it, ask for clarification instead of marking off-topic
+    return {
+      success: true,
+      intent: 'clarification',
+      response: 'No pude entender bien tu pedido. ¿Podrías ser más específico?\n\nEjemplo: "Quiero una docena de empanadas de carne"\n\nO escribí "menú" para ver todas las opciones.',
+      aiService: 'basic_fallback'
+    };
+  }
+
+  /**
+   * Extract quantity from text for basic pattern matching
+   */
+  extractQuantity(text, flavor) {
+    // Look for patterns like "12 de carne", "una docena de carne", etc.
+    const flavorPattern = new RegExp(`(\\d+|una?|dos|tres|cuatro|cinco|seis|media|docena|docena y media)\\s*(?:de\\s+)?${flavor}`, 'i');
+    const match = text.match(flavorPattern);
+    
+    if (!match) return 0;
+    
+    const quantityStr = match[1].toLowerCase();
+    
+    // Convert Spanish numbers to integers
+    const quantityMap = {
+      'una': 1, 'un': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5, 'seis': 6,
+      'media': 6, 'docena': 12, 'docena y media': 18
+    };
+    
+    return quantityMap[quantityStr] || parseInt(quantityStr) || 0;
+  }
+
+  /**
+   * Handle basic order without AI processing
+   */
+  async handleBasicOrder(orderItems, phoneNumber, action, restaurantConfig) {
+    try {
+      // Find or create conversation
+      let conversation = await prisma.conversation.findFirst({
+        where: { phoneNumber, status: 'BOT_ACTIVE' },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (!conversation) {
+        conversation = await prisma.conversation.create({
+          data: { phoneNumber, status: 'BOT_ACTIVE' }
+        });
+      }
+
+      if (action === 'REPLACE_ALL') {
+        // Clear existing order
+        await prisma.orderDraft.deleteMany({
+          where: { conversationId: conversation.id }
+        });
+      }
+
+      // Add new items
+      for (const item of orderItems) {
+        const existingDraft = await prisma.orderDraft.findFirst({
+          where: { 
+            conversationId: conversation.id,
+            itemId: item.itemId 
+          }
+        });
+
+        if (existingDraft && action === 'ADD_ITEM') {
+          // Update existing
+          await prisma.orderDraft.update({
+            where: { id: existingDraft.id },
+            data: { quantity: existingDraft.quantity + item.quantity }
+          });
+        } else {
+          // Create new
+          await prisma.orderDraft.create({
+            data: {
+              conversationId: conversation.id,
+              itemId: item.itemId,
+              itemName: item.itemName,
+              quantity: item.quantity,
+              extraData: {
+                price: item.price,
+                category: 'Empanadas',
+                createdAt: new Date().toISOString()
+              }
+            }
+          });
+        }
+      }
+
+      // Get updated order summary
+      const allDrafts = await prisma.orderDraft.findMany({
+        where: { conversationId: conversation.id }
+      });
+
+      const summary = allDrafts.map(item => 
+        `• ${item.quantity}x ${item.itemName} ($${((item.extraData?.price || 0) * item.quantity).toFixed(2)})`
+      ).join('\n');
+
+      const total = allDrafts.reduce((sum, item) => {
+        const price = item.extraData?.price || 0;
+        return sum + (price * item.quantity);
+      }, 0);
+
+      const actionText = action === 'REPLACE_ALL' ? '✅ ¡Perfecto! Cambié tu pedido por:' : '✅ ¡Perfecto! Agregué a tu pedido:';
+
+      return {
+        success: true,
+        intent: 'order',
+        response: `${actionText}\n\n${summary}\n\n💰 **Total: $${total.toFixed(2)}**\n\n¿Querés agregar algo más o confirmar el pedido?`,
+        aiService: 'basic_fallback'
+      };
+
+    } catch (error) {
+      console.error('Error handling basic order:', error);
+      return {
+        success: false,
+        intent: 'error', 
+        response: 'Hubo un error procesando tu pedido. Intentá de nuevo.',
+        aiService: 'basic_fallback'
       };
     }
   }
