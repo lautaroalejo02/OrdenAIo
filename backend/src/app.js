@@ -17,8 +17,26 @@ const app = express();
 
 // HTTP security headers
 app.use(helmet());
-// Enable CORS
-app.use(cors());
+
+// Enhanced CORS configuration
+const corsOptions = {
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://ordenalo-front-production.up.railway.app',
+    'https://ordenaio-production.up.railway.app', // Handle the typo in case it exists
+    'https://ordenalo-production.up.railway.app'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
+
 // JSON body parsing
 app.use(express.json());
 // Request logging
