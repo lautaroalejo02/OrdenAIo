@@ -4,13 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Plus, Minus, ShoppingCart, X, MapPin } from 'lucide-react';
 
-// API Configuration - detect environment and use appropriate URL
+// API Configuration - Always use production URL for now to fix Railway issues
 const getApiBaseUrl = () => {
-  // If we're in development, use relative paths (proxy will handle it)
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return '';
-  }
-  // In production, use the full backend URL - handle potential domain variations
+  // For debugging, let's always use the production URL
+  // This ensures it works on Railway regardless of hostname detection issues
+  console.log('Current hostname:', window.location.hostname);
+  console.log('Forcing production API URL for Railway compatibility');
   return 'https://ordenalo-production.up.railway.app';
 };
 
@@ -41,9 +40,15 @@ const Menu = () => {
       // Use environment-appropriate URL
       const apiBaseUrl = getApiBaseUrl();
       const apiUrl = `${apiBaseUrl}/api/menu/data?phone=${customerPhone}`;
+      
+      console.log('API Base URL:', apiBaseUrl);
+      console.log('Full API URL:', apiUrl);
       console.log('Making API call to:', apiUrl);
       
       const response = await fetch(apiUrl);
+      
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -55,6 +60,11 @@ const Menu = () => {
       setMenuData(data);
     } catch (err) {
       console.error('Error loading menu:', err);
+      console.error('Error details:', {
+        message: err.message,
+        stack: err.stack,
+        name: err.name
+      });
       setError(err.message);
     } finally {
       setLoading(false);
