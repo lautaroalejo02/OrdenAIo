@@ -4,8 +4,8 @@ import IntelligentOrderProcessor from '../services/intelligentOrderProcessor.js'
 const APP_URL = process.env.APP_URL && process.env.APP_URL !== '' ? process.env.APP_URL : 'http://localhost:5173';
 const prisma = new PrismaClient();
 
-// Initialize the intelligent processor
-const intelligentProcessor = new IntelligentOrderProcessor();
+// Initialize the intelligent processor with OpenAI API key
+const intelligentProcessor = new IntelligentOrderProcessor(process.env.OPENAI_API_KEY);
 
 // Helper to get or create restaurant config
 async function getOrCreateConfig() {

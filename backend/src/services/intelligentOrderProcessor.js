@@ -18,17 +18,21 @@ class IntelligentOrderProcessor {
     console.log(`\n==================== INTELLIGENT ORDER PROCESSING ====================`);
     console.log(`Message: "${message}"`);
     console.log(`Phone: ${phoneNumber}`);
+    console.log(`Menu items count: ${menuItems ? menuItems.length : 0}`);
     
     try {
       // Get conversation context
       const context = await this.getContext(phoneNumber);
+      console.log(`Context: ${context.activeOrder ? `Active order with ${context.activeOrder.items.length} items` : 'No active order'}`);
       
       // Get restaurant configuration
       const restaurantConfig = await this.getRestaurantConfig();
+      console.log(`Restaurant config: ${restaurantConfig ? restaurantConfig.restaurantName : 'Not found'}`);
       
       // Check if restaurant is open
       const isOpen = this.isRestaurantOpen(restaurantConfig);
       if (!isOpen.open) {
+        console.log(`🔒 Restaurant is closed: ${isOpen.message}`);
         return {
           success: true,
           intent: 'closed',
@@ -38,14 +42,21 @@ class IntelligentOrderProcessor {
       }
       
       // Check for simple intents first (menu, confirm, cancel, etc.)
+      console.log(`🔍 Checking for simple intents...`);
       const simpleIntent = await this.detectSimpleIntents(message, context, restaurantConfig);
-      if (simpleIntent) return simpleIntent;
+      if (simpleIntent) {
+        console.log(`✅ Simple intent detected: ${simpleIntent.intent}`);
+        return simpleIntent;
+      }
 
+      console.log(`🧠 No simple intent found, proceeding to OpenAI analysis...`);
+      
       // Use OpenAI to understand the order
       const orderResult = await this.analyzeOrderWithAI(message, menuItems, context, restaurantConfig);
       
       // Check if OpenAI detected off-topic content
       if (orderResult.off_topic) {
+        console.log(`🚫 OpenAI detected off-topic content`);
         return {
           success: true,
           intent: 'off_topic',
@@ -55,13 +66,15 @@ class IntelligentOrderProcessor {
       }
       
       if (orderResult.success) {
+        console.log(`✅ Valid order detected by OpenAI`);
         return await this.handleValidOrder(orderResult, phoneNumber, message, restaurantConfig);
       } else {
+        console.log(`❓ Ambiguous order detected by OpenAI`);
         return await this.handleAmbiguousOrder(orderResult, phoneNumber, menuItems);
       }
       
     } catch (error) {
-      console.error('Error processing order:', error);
+      console.error('❌ Error processing order:', error);
       return {
         success: false,
         intent: 'error',
@@ -471,19 +484,23 @@ Analizá el mensaje y respondé con el formato JSON especificado, incluyendo una
    */
   async detectSimpleIntents(message, context, restaurantConfig) {
     const text = message.toLowerCase().trim();
+    console.log(`🔍 detectSimpleIntents called with: "${text}"`);
     
     // PRIORITY: Detect digital menu orders first
     if (message.includes('🤖 PEDIDO_DIGITAL_MENU')) {
+      console.log('📱 Digital menu order detected');
       return await this.handleDigitalMenuOrder(message, context.phoneNumber, restaurantConfig);
     }
     
     // Handle greetings - offer to continue previous order or start fresh
     if (this.isGreeting(text)) {
+      console.log('👋 Greeting detected');
       return await this.handleGreeting(context.phoneNumber, restaurantConfig);
     }
     
     // Show menu with both digital and chat options
     if (text.includes('menu') || text.includes('menú') || text.includes('carta')) {
+      console.log('📋 Menu request detected');
       const menuLink = `${process.env.APP_URL || 'https://ordenalo-front-production.up.railway.app'}/menu?phone=${context.phoneNumber}`;
       
       return {
@@ -508,6 +525,7 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
 
     // Show delivery zones
     if (text.includes('zona') || text.includes('delivery') || text.includes('envío') || text.includes('envio')) {
+      console.log('📍 Delivery zones request detected');
       return {
         success: true,
         intent: 'delivery_zones',
@@ -518,6 +536,7 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
 
     // Show hours
     if (text.includes('horario') || text.includes('hora') || text.includes('abierto') || text.includes('cerrado')) {
+      console.log('🕐 Hours request detected');
       return {
         success: true,
         intent: 'hours',
@@ -529,16 +548,19 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
     // Confirm order - handle "CONFIRMAR" command
     if ((text.includes('confirmar') || text.includes('si') || text.includes('sí') || text.includes('ok')) 
         && context.activeOrder && context.activeOrder.items.length > 0) {
+      console.log('✅ Order confirmation detected');
       return await this.confirmOrder(context.phoneNumber, restaurantConfig);
     }
 
     // Cancel order
     if (text.includes('cancelar') || text.includes('no') || text.includes('borrar')) {
+      console.log('❌ Order cancellation detected');
       return await this.cancelOrder(context.phoneNumber);
     }
 
     // Show current order
     if (text.includes('pedido') && (text.includes('actual') || text.includes('ver'))) {
+      console.log('👀 Show current order detected');
       return await this.showCurrentOrder(context.phoneNumber);
     }
 
@@ -559,6 +581,7 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
     );
     
     if (hasOffTopicKeyword) {
+      console.log('🚫 Off-topic message detected');
       return {
         success: true,
         intent: 'off_topic',
@@ -567,6 +590,7 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
       };
     }
 
+    console.log('🧠 No simple intent detected, sending to OpenAI');
     return null; // Let it go to OpenAI for intelligent processing
   }
 
