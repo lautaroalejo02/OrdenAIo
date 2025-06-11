@@ -4,12 +4,18 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Plus, Minus, ShoppingCart, X, MapPin } from 'lucide-react';
 
-// API Configuration - Always use production URL for now to fix Railway issues
+// API Configuration - Use environment variables when available
 const getApiBaseUrl = () => {
+  // Check for environment variable first
+  if (import.meta.env.VITE_API_URL) {
+    console.log('Using VITE_API_URL:', import.meta.env.VITE_API_URL);
+    return import.meta.env.VITE_API_URL;
+  }
+  
   // For debugging, let's always use the production URL
   // This ensures it works on Railway regardless of hostname detection issues
   console.log('Current hostname:', window.location.hostname);
-  console.log('Forcing production API URL for Railway compatibility');
+  console.log('Using hardcoded production API URL');
   return 'https://ordenalo-production.up.railway.app';
 };
 
