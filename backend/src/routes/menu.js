@@ -11,22 +11,31 @@ const processor = new IntelligentOrderProcessor(process.env.OPENAI_API_KEY);
 // Endpoint to serve menu data for the React frontend
 router.get('/data', async (req, res) => {
   try {
+    console.log(`📋 Menu API called from origin: ${req.get('Origin')}`);
+    console.log(`📋 Menu API query params:`, req.query);
+    
     const { phone } = req.query;
     if (!phone) {
+      console.log('❌ No phone provided');
       return res.status(400).json({
         error: 'Phone number required',
         code: 'MISSING_PHONE',
       });
     }
 
+    console.log(`📋 Loading menu for phone: ${phone}`);
+
     // Retrieve restaurant configuration from the database
     const config = await prisma.restaurantConfig.findFirst();
     if (!config) {
+      console.log('❌ No restaurant config found');
       return res.status(500).json({
         error: 'Restaurant configuration not found',
         code: 'NO_CONFIG',
       });
     }
+
+    console.log(`✅ Found config for: ${config.restaurantName}`);
 
     // Use intelligent restaurant status instead of fixed isOpen field
     const restaurantStatus = processor.isRestaurantOpen(config);
@@ -42,6 +51,8 @@ router.get('/data', async (req, res) => {
       menuItems = [];
     }
 
+    console.log(`📋 Returning ${menuItems.length} menu items. Restaurant open: ${restaurantStatus.open}`);
+
     // Respond with menu and restaurant data
     res.json({
       restaurant: {
@@ -55,7 +66,7 @@ router.get('/data', async (req, res) => {
       success: true,
     });
   } catch (error) {
-    console.error('Error loading menu data:', error);
+    console.error('❌ Error loading menu data:', error);
     res.status(500).json({
       error: 'Server error loading menu',
       code: 'SERVER_ERROR',

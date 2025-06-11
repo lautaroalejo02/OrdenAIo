@@ -20,13 +20,27 @@ app.use(helmet());
 
 // Enhanced CORS configuration
 const corsOptions = {
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'https://ordenalo-front-production.up.railway.app',
-    'https://ordenaio-production.up.railway.app', // Handle the typo in case it exists
-    'https://ordenalo-production.up.railway.app'
-  ],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // List of allowed origins
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'https://ordenalo-front-production.up.railway.app',
+      'https://ordenaio-production.up.railway.app', // Handle the typo in case it exists
+      'https://ordenalo-production.up.railway.app'
+    ];
+    
+    // Check if origin is in allowed list or is a Railway app domain
+    if (allowedOrigins.includes(origin) || origin.includes('.up.railway.app')) {
+      callback(null, true);
+    } else {
+      console.log(`CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']

@@ -10,7 +10,7 @@ const getApiBaseUrl = () => {
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return '';
   }
-  // In production, use the full backend URL
+  // In production, use the full backend URL - handle potential domain variations
   return 'https://ordenalo-production.up.railway.app';
 };
 
