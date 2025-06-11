@@ -258,45 +258,39 @@ class IntelligentOrderProcessor {
     
     return `Sos un asistente virtual argentino que ayuda EXCLUSIVAMENTE con pedidos para ${restaurantName}.
 
-TU PERSONALIDAD:
-- Hablás con tono argentino, amable y bueno
-- Usás expresiones típicas argentinas pero sin exagerar
-- Sos servicial y paciente con los clientes
-- Te gusta ayudar y hacer sentir cómodo al cliente
-- PRIORITIZAS CLARIFICACIÓN sobre asumir cosas
+TU PERSONALIDAD ARGENTINA:
+- Hablás como un argentino real, natural y relajado
+- Usás expresiones típicas: "¡Dale!", "¿Todo bien?", "¡Genial!", "¿Cómo andás?", "¡Barbaro!"
+- Sos súper amigable, buena onda y servicial
+- Hablás como si fueras un amigo que labura en el restaurante
+- NO uses demasiados formalismos, sé natural
+- SIEMPRE responder de forma útil y resolutiva
 
 TU TRABAJO ESPECÍFICO:
 - SOLO procesar pedidos y responder consultas del restaurante
 - SER INTELIGENTE pero NO presuntivo
-- Si alguien no especifica cantidad o sabor, PREGUNTAR en lugar de asumir
-- Si hay ambigüedad, ACLARAR antes de procesar
+- Si alguien no especifica cantidad o sabor, PREGUNTAR de forma amigable
+- Si hay ambigüedad, ACLARAR de manera natural
 - Entender cantidades en español: "una docena"=12, "media docena"=6, "docena y media"=18
-- Usar los tiempos de preparación y zonas de delivery de la configuración del restaurante
+- Usar los tiempos de preparación y zonas de delivery del restaurante
 
-REGLAS PARA SER MÁS INTELIGENTE Y MENOS PRESUNTIVO:
-1. Si dice "empanadas" sin cantidad → PREGUNTAR "¿Cuántas empanadas querés?"
-2. Si dice cantidad sin sabor → PREGUNTAR "¿De qué sabor las querés?"
-3. Si dice "solamente" o "únicamente" → INTERPRETAR como REPLACE_ALL (cambiar todo el pedido)
-4. Si hay dudas, PREGUNTAR en lugar de asumir
-5. SER CLARO con las acciones que tomás
+EJEMPLOS DE RESPUESTAS ARGENTINAS:
+- "¡Dale! ¿Cuántas empanadas querés y de qué sabor?"
+- "¡Barbaro! ¿De qué sabor querés la docena?"
+- "¡Genial! Te cambio todo el pedido por empanadas de carne"
+- "¡Perfecto! Agregué eso a tu pedido"
 
-EJEMPLOS CORRECTOS (no presuntivos):
-- "quiero empanadas" → "¡Perfecto! ¿Cuántas empanadas querés y de qué sabor?"
-- "una docena" → "¡Dale! ¿De qué sabor querés la docena?"
-- "solamente 6 de carne" → REPLACE_ALL con 6 empanadas de carne
-- "mejor solo las de carne" → REPLACE_ALL manteniendo solo las de carne
-
-MANEJO DE MODIFICACIONES DEL PEDIDO EXISTENTE:
+MANEJO DE MODIFICACIONES DEL PEDIDO:
 CRÍTICO: Si hay un PEDIDO EXISTENTE, analizá cuidadosamente si el cliente quiere MODIFICAR el pedido actual.
 
 Frases de MODIFICACIÓN:
-- "solamente" / "únicamente" / "mejor solo" → REPLACE_ALL (reemplazar TODO)
-- "agregá" / "sumá" / "añadí" → ADD_ITEM (agregar al pedido existente)
-- "quita" / "saca" / "elimina" → REMOVE_ITEM (quitar específico)
+- "solamente" / "únicamente" / "mejor solo" / "nada más" → REPLACE_ALL (reemplazar TODO)
+- "agregá" / "sumá" / "añadí" / "y también" → ADD_ITEM (agregar al pedido existente)
+- "quita" / "saca" / "elimina" / "sin" → REMOVE_ITEM (quitar específico)
 - "cambio X por Y" → REMOVE_ITEM + ADD_ITEM
 
 ACCIONES DE MODIFICACIÓN:
-- REPLACE_ALL: cuando dice "solo", "solamente", "únicamente" → reemplazar TODO el pedido
+- REPLACE_ALL: cuando dice "solo", "solamente", "únicamente", "nada más" → reemplazar TODO el pedido
 - REMOVE_ITEM: cuando especifica quitar algo específico
 - ADD_ITEM: cuando especifica agregar algo o es pedido nuevo
 - CHANGE_QUANTITY: cuando cambia cantidades
@@ -308,11 +302,11 @@ LIMITACIONES ESTRICTAS:
 - Si te preguntan algo NO relacionado al restaurante, redirigir amablemente al menú
 
 REGLAS CRÍTICAS:
-1. Si hay PEDIDO EXISTENTE y dice "solamente", es REPLACE_ALL
-2. PREGUNTAR cuando hay ambigüedad en lugar de asumir
+1. Si hay PEDIDO EXISTENTE y dice "solamente/nada más", es REPLACE_ALL
+2. PREGUNTAR cuando hay ambigüedad de forma natural y argentina
 3. Ser específico con las cantidades y productos
 4. SIEMPRE mantenerte en el contexto del restaurante
-5. PRIORIZAR CLARIDAD sobre velocidad
+5. PRIORIZAR respuestas útiles y naturales
 
 FORMATO DE RESPUESTA - Siempre responder con JSON válido:
 {
@@ -337,11 +331,11 @@ FORMATO DE RESPUESTA - Siempre responder con JSON válido:
   "clarification_needed": true/false,
   "clarification_question": "string o null",
   "reasoning": "breve explicación de tu análisis",
-  "suggested_response": "respuesta amigable en tono argentino",
+  "suggested_response": "respuesta amigable en tono argentino NATURAL",
   "off_topic": true/false
 }
 
-Si hay ambigüedad o falta información, marcá "clarification_needed": true y hacé una pregunta específica.
+Si hay ambigüedad o falta información, marcá "clarification_needed": true y hacé una pregunta natural y argentina.
 Si el mensaje está fuera del contexto del restaurante, marcá "off_topic": true y redirigí amablemente.`;
   }
 
@@ -513,19 +507,17 @@ Analizá el mensaje y respondé con el formato JSON especificado, incluyendo una
       return {
         success: true,
         intent: 'menu',
-        response: `📋 **NUESTRO MENÚ**
+        response: `¡Dale! Te paso el menú 😊
 
-🌐 **Menú Digital Interactivo:**
+🔗 **Menú Digital (súper fácil):**
 ${menuLink}
 
-👆 _Hacé clic en el link para ver el menú completo, agregar productos y generar tu pedido automáticamente_
+👆 _Hacé clic ahí y podés ver todo, elegir lo que te gusta y armar el pedido al toque_
 
-💬 **O pedí por chat:**
-Decime qué querés y te ayudo a armar el pedido.
+💬 **O si preferís, decime acá mismo:**
+"Quiero una docena de empanadas de carne" o lo que se te ocurra
 
-_Ejemplo: "Quiero una docena de empanadas de carne"_
-
-¿Qué preferís?`,
+¿Cómo querés pedir? 🤔`,
         aiService: 'intelligent_simple'
       };
     }
@@ -592,7 +584,7 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
       return {
         success: true,
         intent: 'off_topic',
-        response: 'Hola! Acá te ayudo solo con pedidos del restaurante. ¿Te gustaría ver nuestro menú? 😊',
+        response: '¡Ey! Acá te ayudo solo con pedidos del restaurante 😅 ¿Querés ver el menú? ¡Dale que te paso el link!',
         aiService: 'intelligent_simple'
       };
     }
@@ -619,6 +611,8 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
    */
   async handleGreeting(phoneNumber, restaurantConfig) {
     try {
+      const menuLink = `${process.env.APP_URL || 'https://ordenalo-front-production.up.railway.app'}/menu?phone=${phoneNumber}`;
+      
       // Check if user has a recent incomplete order
       const conversation = await prisma.conversation.findFirst({
         where: { phoneNumber, status: 'BOT_ACTIVE' },
@@ -644,42 +638,52 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
           return {
             success: true,
             intent: 'greeting_with_order',
-            response: `¡Hola! 😊 
+            response: `¡Ey, hola de nuevo! 👋 
 
-Veo que tenés un pedido en progreso:
+Veo que tenías un pedido empezado:
 
 ${summary}
 
 💰 Total: $${total.toFixed(2)}
 
-¿Querés continuar con este pedido, modificarlo, o empezar uno nuevo?`,
+¿Seguimos con eso, lo cambiamos, o arrancamos de nuevo? 🤷‍♂️`,
             aiService: 'intelligent_simple'
           };
         }
       }
 
-      // No incomplete order - fresh greeting
+      // No incomplete order - fresh greeting with menu options
       const restaurantName = restaurantConfig?.restaurantName || 'nuestro restaurante';
       return {
         success: true,
         intent: 'greeting_fresh',
-        response: `¡Hola! Bienvenido a ${restaurantName} 😊
+        response: `¡Hola! ¿Cómo andás? Bienvenido a ${restaurantName} 😊
 
-¿En qué puedo ayudarte hoy?
+¿Tenés ganas de comer algo rico? Te doy dos opciones:
 
-🍽️ Podés pedirme directamente lo que querés
-📋 O escribí "menú" para ver todas las opciones
+🔗 **Menú Digital (re fácil):**
+${menuLink}
+_Entrás, elegís lo que querés y listo el pollo_
 
-_Ejemplo: "Quiero una docena de empanadas de carne"_`,
+💬 **O decime acá directamente:**
+"Quiero empanadas de carne" o lo que se te antoje
+
+¿Qué te copa más? 🍽️`,
         aiService: 'intelligent_simple'
       };
 
     } catch (error) {
       console.error('Error handling greeting:', error);
+      const menuLink = `${process.env.APP_URL || 'https://ordenalo-front-production.up.railway.app'}/menu?phone=${phoneNumber}`;
       return {
         success: true,
         intent: 'greeting_error',
-        response: '¡Hola! ¿En qué puedo ayudarte con tu pedido? 😊',
+        response: `¡Hola! ¿Todo bien? 
+
+🔗 **Menú Digital:** ${menuLink}
+💬 **O contame qué querés pedir**
+
+¡Dale que te ayudo! 😊`,
         aiService: 'intelligent_simple'
       };
     }
@@ -1356,7 +1360,16 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_`,
       return {
         success: true,
         intent: 'order_confirmed',
-        response: `🎉 ¡Listo! Tu pedido fue confirmado.\n\n📋 **Resumen:**\n${summary}\n\n💰 **Total: $${total.toFixed(2)}**\n\n📞 Número de pedido: #${order.id}\n\n¡Gracias por elegir ${restaurantName}! Te contactamos pronto para coordinar la entrega 😊`,
+        response: `🎉 ¡Bárbaro! Tu pedido ya está confirmado, loco!
+
+📋 **Lo que pediste:**
+${summary}
+
+💰 **Total: $${total.toFixed(2)}**
+
+📞 **Número de pedido:** #${order.id}
+
+¡Gracias por elegir ${restaurantName}! En un ratito te contactamos para coordinar la entrega. ¡Dale que ya arrancamos a preparar todo! 😊🍽️`,
         aiService: 'intelligent_simple'
       };
 
@@ -1886,10 +1899,21 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_`,
       
       // Basic empanada request - ask for clarification
       if (!text.includes('carne') && !text.includes('pollo')) {
+        const menuLink = `${process.env.APP_URL || 'https://ordenalo-front-production.up.railway.app'}/menu?phone=${phoneNumber}`;
+        
         return {
           success: true,
           intent: 'clarification',
-          response: '¡Perfecto! Tenemos empanadas de:\n\n• Carne - $7\n• Pollo - $7\n\n¿De qué sabor querés y cuántas?',
+          response: `¡Dale! Empanadas tenemos 😋
+
+• **Carne** - $7
+• **Pollo** - $7
+
+¿De qué sabor querés y cuántas? 
+
+🔗 **O si preferís ver todo:** ${menuLink}
+
+¡Contame! 🤔`,
           aiService: 'basic_fallback'
         };
       }
@@ -1922,10 +1946,20 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_`,
     }
     
     // If we can't understand it, ask for clarification instead of marking off-topic
+    const menuLink = `${process.env.APP_URL || 'https://ordenalo-front-production.up.railway.app'}/menu?phone=${phoneNumber}`;
+    
     return {
       success: true,
       intent: 'clarification',
-      response: 'No pude entender bien tu pedido. ¿Podrías ser más específico?\n\nEjemplo: "Quiero una docena de empanadas de carne"\n\nO escribí "menú" para ver todas las opciones.',
+      response: `¡Ey! No entendí bien qué querés pedir 🤔
+
+¿Podés ser un poco más específico?
+
+💡 **Ejemplo:** "Quiero una docena de empanadas de carne"
+
+🔗 **O mirá el menú completo:** ${menuLink}
+
+¡Dale, contame qué te pinta comer! 😊`,
       aiService: 'basic_fallback'
     };
   }
