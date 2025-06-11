@@ -59,6 +59,7 @@ router.get('/data', async (req, res) => {
         name: config.restaurantName || 'Our Restaurant',
         isOpen: restaurantStatus.open,
         phone: process.env.WHATSAPP_NUMBER,
+        whatsappNumber: process.env.WHATSAPP_NUMBER, // Bot number for receiving digital menu orders
         outOfHoursMessage: restaurantStatus.message || config.outOfHoursMessage,
       },
       menu: menuItems,

@@ -126,32 +126,37 @@ const Menu = () => {
       }
     });
 
-    // Generate formatted message in Spanish
-    let message = `🛒 *MI PEDIDO - ${menuData.restaurant.name}*\n\n`;
+    // Generate DETECTABLE template for the bot
+    let message = `🤖 PEDIDO_DIGITAL_MENU\n`;
+    message += `📱 Cliente: ${customerPhone.replace('@c.us', '')}\n`;
+    message += `📍 Dirección: ${deliveryAddress}\n\n`;
+    message += `📋 PRODUCTOS:\n`;
     
     let totalPrice = 0;
 
     // Add items by category
     Object.entries(itemsByCategory).forEach(([category, items]) => {
-      message += `📋 *${category.toUpperCase()}*\n`;
+      message += `\n🔸 ${category.toUpperCase()}:\n`;
       items.forEach(item => {
-        message += `${item.emoji} ${item.name} x${item.quantity} - $${item.subtotal.toFixed(2)}\n`;
+        message += `• ${item.quantity}x ${item.name} - $${item.subtotal.toFixed(2)}\n`;
         totalPrice += item.subtotal;
       });
-      message += '\n';
     });
 
-    message += `💰 *TOTAL: $${totalPrice.toFixed(2)}*\n\n`;
-    message += `📍 *DIRECCIÓN DE ENTREGA:*\n${deliveryAddress}\n\n`;
-    message += `✅ *Para confirmar este pedido, escribí:* CONFIRMAR\n`;
-    message += `❌ *Para cancelar, escribí:* CANCELAR\n\n`;
-    message += `📞 Cualquier consulta sobre tiempos o zonas, preguntame! 🚀`;
+    message += `\n💰 TOTAL: $${totalPrice.toFixed(2)}\n\n`;
+    message += `✅ Pedido generado desde menú digital\n`;
+    message += `⏰ ${new Date().toLocaleString('es-AR')}`;
 
-    // Open WhatsApp - clean phone number from @c.us suffix
-    const cleanPhone = customerPhone.replace('@c.us', '');
+    // Use bot number from restaurant config (WHATSAPP_NUMBER from backend)
+    const botNumber = menuData.restaurant.whatsappNumber || '12024879792'; // Fallback
     const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
+    const whatsappUrl = `https://wa.me/${botNumber}?text=${encodedMessage}`;
+    
+    // Open WhatsApp to send to bot
     window.open(whatsappUrl, '_blank');
+    
+    // Show confirmation to user
+    alert('🚀 ¡Pedido enviado! Te contactaremos pronto para confirmar la entrega.');
   };
 
   const getProductEmoji = (name, category) => {

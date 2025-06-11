@@ -476,6 +476,11 @@ Analizá el mensaje y respondé con el formato JSON especificado, incluyendo una
   async detectSimpleIntents(message, context, restaurantConfig) {
     const text = message.toLowerCase().trim();
     
+    // PRIORITY: Detect digital menu orders first
+    if (message.includes('🤖 PEDIDO_DIGITAL_MENU')) {
+      return await this.handleDigitalMenuOrder(message, context.phoneNumber, restaurantConfig);
+    }
+    
     // Check for off-topic questions first
     const offTopicKeywords = [
       'política', 'politica', 'elecciones', 'gobierno',
@@ -567,6 +572,281 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
     */
 
     return null; // No simple intent detected
+  }
+
+  /**
+   * Handle digital menu orders with automatic forwarding and processing
+   */
+  async handleDigitalMenuOrder(message, botPhoneNumber, restaurantConfig) {
+    console.log('🎯 Processing digital menu order from:', botPhoneNumber);
+    
+    try {
+      // Extract customer phone and delivery info from message
+      const customerPhoneMatch = message.match(/📱 Cliente: ([^\n]+)/);
+      const deliveryAddressMatch = message.match(/📍 Dirección: ([^\n]+)/);
+      const totalMatch = message.match(/💰 TOTAL: \$([0-9.]+)/);
+      
+      if (!customerPhoneMatch || !deliveryAddressMatch) {
+        console.error('❌ Could not extract customer info from digital menu order');
+        return {
+          success: false,
+          intent: 'error',
+          response: 'Error procesando el pedido del menú digital.',
+          aiService: 'intelligent_simple'
+        };
+      }
+
+      const customerPhone = customerPhoneMatch[1];
+      const deliveryAddress = deliveryAddressMatch[1];
+      const totalAmount = totalMatch ? parseFloat(totalMatch[1]) : 0;
+
+      console.log(`📞 Customer: ${customerPhone}`);
+      console.log(`📍 Address: ${deliveryAddress}`);
+      console.log(`💰 Total: $${totalAmount}`);
+
+      // Extract items from the message
+      const itemsSection = message.split('📋 PRODUCTOS:')[1]?.split('💰 TOTAL:')[0];
+      if (!itemsSection) {
+        console.error('❌ Could not extract items from digital menu order');
+        return {
+          success: false,
+          intent: 'error',
+          response: 'Error procesando los productos del pedido.',
+          aiService: 'intelligent_simple'
+        };
+      }
+
+      // Parse items and calculate highest preparation time
+      const items = this.parseDigitalMenuItems(itemsSection);
+      const maxPrepTime = this.calculateMaxPreparationTime(items, restaurantConfig);
+
+      // Create conversation and order for the actual customer
+      const customerConversation = await this.createCustomerOrder(
+        `${customerPhone}@c.us`, 
+        items, 
+        deliveryAddress, 
+        totalAmount
+      );
+
+      // Send confirmation to bot (Railway logs) 
+      const botResponse = `✅ Pedido digital procesado exitosamente!\n\n` +
+        `👤 Cliente: ${customerPhone}\n` +
+        `📦 Productos: ${items.length} items\n` +
+        `💰 Total: $${totalAmount.toFixed(2)}\n` +
+        `⏱️ Tiempo de preparación: ${maxPrepTime} minutos\n\n` +
+        `🤖 Enviando confirmación al cliente y notificación al restaurante...`;
+
+      // Forward order notification to restaurant
+      await this.forwardToRestaurant(customerPhone, items, deliveryAddress, totalAmount, maxPrepTime);
+
+      // Send confirmation to customer  
+      await this.sendCustomerConfirmation(customerPhone, items, deliveryAddress, totalAmount, maxPrepTime, restaurantConfig);
+
+      return {
+        success: true,
+        intent: 'digital_menu_processed',
+        response: botResponse,
+        aiService: 'intelligent_simple'
+      };
+
+    } catch (error) {
+      console.error('❌ Error processing digital menu order:', error);
+      return {
+        success: false,
+        intent: 'error',
+        response: 'Error procesando el pedido del menú digital.',
+        aiService: 'intelligent_simple'
+      };
+    }
+  }
+
+  /**
+   * Parse items from digital menu message
+   */
+  parseDigitalMenuItems(itemsSection) {
+    const items = [];
+    const lines = itemsSection.split('\n');
+    
+    for (const line of lines) {
+      // Match pattern: • 18x Empanada de pollo - $126.00
+      const itemMatch = line.match(/• (\d+)x (.+?) - \$([0-9.]+)/);
+      if (itemMatch) {
+        const quantity = parseInt(itemMatch[1]);
+        const name = itemMatch[2].trim();
+        const subtotal = parseFloat(itemMatch[3]);
+        const unitPrice = subtotal / quantity;
+        
+        items.push({
+          name,
+          quantity,
+          unitPrice,
+          subtotal,
+          category: this.inferCategory(name)
+        });
+      }
+    }
+    
+    console.log(`📋 Parsed ${items.length} items from digital menu`);
+    return items;
+  }
+
+  /**
+   * Infer category from item name
+   */
+  inferCategory(itemName) {
+    const name = itemName.toLowerCase();
+    if (name.includes('empanada')) return 'Empanadas';
+    if (name.includes('pizza')) return 'Pizzas';
+    if (name.includes('hamburguesa') || name.includes('burger')) return 'Hamburguesas';
+    if (name.includes('bebida') || name.includes('gaseosa')) return 'Bebidas';
+    if (name.includes('ensalada')) return 'Ensaladas';
+    return 'General';
+  }
+
+  /**
+   * Calculate maximum preparation time from items
+   */
+  calculateMaxPreparationTime(items, restaurantConfig) {
+    if (!restaurantConfig?.preparationTimes) {
+      console.log('⚠️ No preparation times configured, using default 20 minutes');
+      return 20;
+    }
+
+    try {
+      const prepTimes = typeof restaurantConfig.preparationTimes === 'string' 
+        ? JSON.parse(restaurantConfig.preparationTimes) 
+        : restaurantConfig.preparationTimes;
+
+      let maxTime = 0;
+      
+      for (const item of items) {
+        const category = item.category;
+        const time = prepTimes[category] || prepTimes['default'] || prepTimes['General'] || 20;
+        maxTime = Math.max(maxTime, time);
+        
+        console.log(`⏱️ ${item.name} (${category}): ${time} min`);
+      }
+
+      console.log(`🕐 Maximum preparation time: ${maxTime} minutes`);
+      return maxTime;
+      
+    } catch (error) {
+      console.error('Error calculating preparation time:', error);
+      return 20; // Default fallback
+    }
+  }
+
+  /**
+   * Create order in database for the actual customer
+   */
+  async createCustomerOrder(customerPhone, items, deliveryAddress, totalAmount) {
+    try {
+      // Create conversation for customer
+      const conversation = await prisma.conversation.create({
+        data: { 
+          phoneNumber: customerPhone, 
+          status: 'COMPLETED' // Already processed
+        }
+      });
+
+      // Create confirmed order directly
+      const order = await prisma.order.create({
+        data: {
+          conversationId: conversation.id,
+          totalAmount: totalAmount,
+          deliveryAddress: deliveryAddress,
+          items: JSON.stringify(items)
+        }
+      });
+
+      console.log(`💾 Created order #${order.id} for customer ${customerPhone}`);
+      return { conversation, order };
+      
+    } catch (error) {
+      console.error('Error creating customer order:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Forward order to restaurant WhatsApp
+   */
+  async forwardToRestaurant(customerPhone, items, deliveryAddress, totalAmount, prepTime) {
+    try {
+      // Use RESTAURANT_PHONE environment variable, fallback to WHATSAPP_NUMBER if not set
+      const restaurantPhone = process.env.RESTAURANT_PHONE || process.env.WHATSAPP_NUMBER;
+      
+      if (!restaurantPhone) {
+        console.log('⚠️ No restaurant phone configured for notifications');
+        return;
+      }
+      
+      let message = `🔔 *NUEVO PEDIDO DESDE MENÚ DIGITAL*\n\n`;
+      message += `👤 *Cliente:* ${customerPhone}\n`;
+      message += `📍 *Dirección:* ${deliveryAddress}\n`;
+      message += `📅 *Fecha:* ${new Date().toLocaleString('es-AR')}\n\n`;
+      
+      message += `📋 *PRODUCTOS:*\n`;
+      items.forEach(item => {
+        message += `• ${item.name} x${item.quantity} - $${item.subtotal.toFixed(2)}\n`;
+      });
+      
+      message += `\n💰 *TOTAL: $${totalAmount.toFixed(2)}*\n`;
+      message += `⏱️ *Tiempo de preparación: ${prepTime} minutos*\n\n`;
+      message += `✅ *Estado:* Pedido automático desde menú digital\n`;
+      message += `📱 *Contactar cliente:* wa.me/${customerPhone}`;
+
+      // Import WhatsApp client dynamically
+      const { default: whatsappClient } = await import('../whatsapp/client.js');
+      
+      if (whatsappClient && whatsappClient.sendMessage) {
+        await whatsappClient.sendMessage(`${restaurantPhone}@c.us`, message);
+        console.log(`📤 Order forwarded to restaurant: ${restaurantPhone}`);
+      } else {
+        console.log('⚠️ WhatsApp client not available for restaurant notification');
+      }
+
+    } catch (error) {
+      console.error('❌ Error forwarding to restaurant:', error);
+      // Don't throw - this shouldn't break the main flow
+    }
+  }
+
+  /**
+   * Send confirmation to customer
+   */
+  async sendCustomerConfirmation(customerPhone, items, deliveryAddress, totalAmount, prepTime, restaurantConfig) {
+    try {
+      const restaurantName = restaurantConfig?.restaurantName || 'nuestro restaurante';
+      
+      let message = `🎉 *¡PEDIDO CONFIRMADO!*\n\n`;
+      message += `Perfecto! Tu pedido tendrá una demora de *${prepTime} minutos*\n\n`;
+      
+      message += `📋 *RESUMEN DEL PEDIDO:*\n`;
+      items.forEach(item => {
+        message += `• ${item.quantity}x ${item.name}\n`;
+      });
+      
+      message += `\n💰 *Total: $${totalAmount.toFixed(2)}*\n`;
+      message += `📍 *Dirección: ${deliveryAddress}*\n\n`;
+      message += `⏱️ *Tiempo estimado de preparación: ${prepTime} minutos*\n\n`;
+      message += `¡Gracias por elegir ${restaurantName}! 😊\n`;
+      message += `Te contactaremos pronto para coordinar la entrega.`;
+
+      // Import WhatsApp client dynamically
+      const { default: whatsappClient } = await import('../whatsapp/client.js');
+      
+      if (whatsappClient && whatsappClient.sendMessage) {
+        await whatsappClient.sendMessage(`${customerPhone}@c.us`, message);
+        console.log(`📤 Confirmation sent to customer: ${customerPhone}`);
+      } else {
+        console.log('⚠️ WhatsApp client not available for customer confirmation');
+      }
+
+    } catch (error) {
+      console.error('❌ Error sending customer confirmation:', error);
+      // Don't throw - this shouldn't break the main flow
+    }
   }
 
   /**
@@ -1326,7 +1606,7 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
     if (name.includes('empanada')) return '🥟';
     if (name.includes('pizza')) return '🍕';
     if (name.includes('hamburguesa') || name.includes('burger')) return '🍔';
-    if (name.includes('bebida') || name.includes('gaseosa') || name.includes('refresco')) return '🥤';
+    if (name.includes('bebida') || name.includes('gaseosa')) return '🥤';
     if (name.includes('ensalada')) return '🥗';
     if (name.includes('sandwich') || name.includes('sándwich')) return '🥪';
     if (name.includes('pasta') || name.includes('spaguetti')) return '🍝';
