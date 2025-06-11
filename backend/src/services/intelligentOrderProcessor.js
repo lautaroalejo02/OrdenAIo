@@ -243,44 +243,42 @@ TU PERSONALIDAD:
 - Usás expresiones típicas argentinas pero sin exagerar
 - Sos servicial y paciente con los clientes
 - Te gusta ayudar y hacer sentir cómodo al cliente
-- SOS PROACTIVO: ayudás sin hacer muchas preguntas
+- PRIORITIZAS CLARIFICACIÓN sobre asumir cosas
 
 TU TRABAJO ESPECÍFICO:
 - SOLO procesar pedidos y responder consultas del restaurante
-- SER MUY FLEXIBLE y asumir cosas razonables
-- Si alguien dice "una docena de empanadas" y hay 2 sabores, ofrecer MIX en lugar de preguntar
-- Si no especifica sabor y hay pocas opciones, SUGERIR directamente en lugar de preguntar
+- SER INTELIGENTE pero NO presuntivo
+- Si alguien no especifica cantidad o sabor, PREGUNTAR en lugar de asumir
+- Si hay ambigüedad, ACLARAR antes de procesar
 - Entender cantidades en español: "una docena"=12, "media docena"=6, "docena y media"=18
 - Usar los tiempos de preparación y zonas de delivery de la configuración del restaurante
 
-REGLAS PARA SER MENOS QUISQUILLOSO:
-1. Si dice "empanadas" sin cantidad, asumir que quiere algunas (3-6) y sugerir
-2. Si dice cantidad sin sabor y hay 2-3 opciones, OFRECER MIX o las más populares
-3. Si hay ambigüedad menor, hacer suposiciones razonables
-4. SOLO pedir clarificación si es absolutamente necesario
-5. Ser más resolutivo que preguntón
+REGLAS PARA SER MÁS INTELIGENTE Y MENOS PRESUNTIVO:
+1. Si dice "empanadas" sin cantidad → PREGUNTAR "¿Cuántas empanadas querés?"
+2. Si dice cantidad sin sabor → PREGUNTAR "¿De qué sabor las querés?"
+3. Si dice "solamente" o "únicamente" → INTERPRETAR como REPLACE_ALL (cambiar todo el pedido)
+4. Si hay dudas, PREGUNTAR en lugar de asumir
+5. SER CLARO con las acciones que tomás
 
-EJEMPLOS BUENOS (menos quisquilloso):
-- "una docena de empanadas" → "¡Dale! ¿Te hago mitad carne y mitad pollo? ¿O preferís un solo sabor?"
-- "quiero empanadas" → "¡Perfecto! ¿Te parece media docena? Tenemos de carne y pollo."
-- "dos docenas" → "¡Bárbaro! ¿Te armo una docena de cada sabor (carne y pollo)?"
+EJEMPLOS CORRECTOS (no presuntivos):
+- "quiero empanadas" → "¡Perfecto! ¿Cuántas empanadas querés y de qué sabor?"
+- "una docena" → "¡Dale! ¿De qué sabor querés la docena?"
+- "solamente 6 de carne" → REPLACE_ALL con 6 empanadas de carne
+- "mejor solo las de carne" → REPLACE_ALL manteniendo solo las de carne
 
 MANEJO DE MODIFICACIONES DEL PEDIDO EXISTENTE:
 CRÍTICO: Si hay un PEDIDO EXISTENTE, analizá cuidadosamente si el cliente quiere MODIFICAR el pedido actual.
 
-Frases de MODIFICACIÓN (no son off-topic):
-- "mejor solamente deja las de carne" → QUITAR todo excepto empanadas de carne
-- "solo quiero las de pollo" → QUITAR todo excepto empanadas de pollo  
-- "cambio las de pollo por carne" → REEMPLAZAR pollo por carne
-- "mejor sin las bebidas" → QUITAR bebidas del pedido
-- "agregale una coca" → AGREGAR coca al pedido existente
-- "quita las empanadas de pollo" → REMOVER empanadas de pollo específicamente
-- "sacá dos empanadas" → REDUCIR cantidad en 2
+Frases de MODIFICACIÓN:
+- "solamente" / "únicamente" / "mejor solo" → REPLACE_ALL (reemplazar TODO)
+- "agregá" / "sumá" / "añadí" → ADD_ITEM (agregar al pedido existente)
+- "quita" / "saca" / "elimina" → REMOVE_ITEM (quitar específico)
+- "cambio X por Y" → REMOVE_ITEM + ADD_ITEM
 
 ACCIONES DE MODIFICACIÓN:
 - REPLACE_ALL: cuando dice "solo", "solamente", "únicamente" → reemplazar TODO el pedido
 - REMOVE_ITEM: cuando especifica quitar algo específico
-- ADD_ITEM: cuando especifica agregar algo
+- ADD_ITEM: cuando especifica agregar algo o es pedido nuevo
 - CHANGE_QUANTITY: cuando cambia cantidades
 
 LIMITACIONES ESTRICTAS:
@@ -289,15 +287,12 @@ LIMITACIONES ESTRICTAS:
 - NO inventar productos que no estén en el menú
 - Si te preguntan algo NO relacionado al restaurante, redirigir amablemente al menú
 
-EJEMPLOS DE REDIRECCIÓN:
-- "Hola! Acá te ayudo solo con pedidos del restaurante. ¿Te gustaría ver nuestro menú?"
-- "Esa información no la tengo, pero puedo ayudarte con tu pedido. ¿Qué te gustaría comer?"
-
 REGLAS CRÍTICAS:
-1. Si hay PEDIDO EXISTENTE, priorizar modificaciones sobre nuevos pedidos
-2. Ser específico con las cantidades y productos
-3. SIEMPRE mantenerte en el contexto del restaurante
-4. PRIORIZAR FLUIDEZ sobre precisión extrema
+1. Si hay PEDIDO EXISTENTE y dice "solamente", es REPLACE_ALL
+2. PREGUNTAR cuando hay ambigüedad en lugar de asumir
+3. Ser específico con las cantidades y productos
+4. SIEMPRE mantenerte en el contexto del restaurante
+5. PRIORIZAR CLARIDAD sobre velocidad
 
 FORMATO DE RESPUESTA - Siempre responder con JSON válido:
 {
@@ -326,6 +321,7 @@ FORMATO DE RESPUESTA - Siempre responder con JSON válido:
   "off_topic": true/false
 }
 
+Si hay ambigüedad o falta información, marcá "clarification_needed": true y hacé una pregunta específica.
 Si el mensaje está fuera del contexto del restaurante, marcá "off_topic": true y redirigí amablemente.`;
   }
 
@@ -481,25 +477,9 @@ Analizá el mensaje y respondé con el formato JSON especificado, incluyendo una
       return await this.handleDigitalMenuOrder(message, context.phoneNumber, restaurantConfig);
     }
     
-    // Check for off-topic questions first
-    const offTopicKeywords = [
-      'política', 'politica', 'elecciones', 'gobierno',
-      'deportes', 'fútbol', 'futbol', 'boca', 'river', 'messi',
-      'clima', 'tiempo', 'lluvia', 'sol',
-      'noticias', 'coronavirus', 'covid',
-      'trabajo', 'empleo', 'busco trabajo',
-      'amor', 'pareja', 'novio', 'novia',
-      'salud', 'doctor', 'medicina'
-    ];
-    
-    const hasOffTopicKeyword = offTopicKeywords.some(keyword => text.includes(keyword));
-    if (hasOffTopicKeyword) {
-      return {
-        success: true,
-        intent: 'off_topic',
-        response: 'Hola! Acá te ayudo solo con pedidos del restaurante. ¿Te gustaría ver nuestro menú? 😊',
-        aiService: 'intelligent_simple'
-      };
+    // Handle greetings - offer to continue previous order or start fresh
+    if (this.isGreeting(text)) {
+      return await this.handleGreeting(context.phoneNumber, restaurantConfig);
     }
     
     // Show menu with both digital and chat options
@@ -562,16 +542,116 @@ _Ejemplo: "Quiero una docena de empanadas de carne"_
       return await this.showCurrentOrder(context.phoneNumber);
     }
 
-    // Remove item intents - DISABLED to use OpenAI intelligent processing
-    /*
-    if (text.includes('quita') || text.includes('saca') || text.includes('elimina') || 
-        text.includes('borra') || text.includes('remueve') || text.includes('sacame') ||
-        text.includes('quitame') || text.includes('eliminame') || text.includes('borrame')) {
-      return await this.handleRemoveIntent(text, context.phoneNumber);
+    // Check for TRULY off-topic questions - be much more restrictive
+    const clearlyOffTopicKeywords = [
+      'política', 'politica', 'elecciones', 'gobierno', 'presidente',
+      'futbol boca river', 'messi ronaldo', 'mundial',
+      'clima lluvia sol', 'tiempo meteorológico',
+      'coronavirus covid pandemia',
+      'trabajo empleo busco trabajo',
+      'amor pareja novio novia casamiento',
+      'salud doctor medicina hospital'
+    ];
+    
+    // Only mark as off-topic if it clearly contains these unrelated keywords
+    const hasOffTopicKeyword = clearlyOffTopicKeywords.some(keyword => 
+      keyword.split(' ').every(word => text.includes(word))
+    );
+    
+    if (hasOffTopicKeyword) {
+      return {
+        success: true,
+        intent: 'off_topic',
+        response: 'Hola! Acá te ayudo solo con pedidos del restaurante. ¿Te gustaría ver nuestro menú? 😊',
+        aiService: 'intelligent_simple'
+      };
     }
-    */
 
-    return null; // No simple intent detected
+    return null; // Let it go to OpenAI for intelligent processing
+  }
+
+  /**
+   * Check if message is a greeting
+   */
+  isGreeting(text) {
+    const greetings = [
+      'hola', 'buenas', 'buen día', 'buen dia', 'buenas tardes', 'buenas noches',
+      'hello', 'hi', 'hey', 'saludos', 'qué tal', 'que tal', 'como estas', 'cómo estás'
+    ];
+    
+    // Check if it's just a greeting (short message with greeting words)
+    return text.length < 20 && greetings.some(greeting => text.includes(greeting));
+  }
+
+  /**
+   * Handle greeting messages intelligently
+   */
+  async handleGreeting(phoneNumber, restaurantConfig) {
+    try {
+      // Check if user has a recent incomplete order
+      const conversation = await prisma.conversation.findFirst({
+        where: { phoneNumber, status: 'BOT_ACTIVE' },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (conversation) {
+        const drafts = await prisma.orderDraft.findMany({
+          where: { conversationId: conversation.id }
+        });
+
+        if (drafts.length > 0) {
+          // Has incomplete order - offer to continue
+          const summary = drafts.map(item => 
+            `• ${item.quantity}x ${item.itemName}`
+          ).join('\n');
+
+          const total = drafts.reduce((sum, item) => {
+            const price = item.extraData?.price || 0;
+            return sum + (price * item.quantity);
+          }, 0);
+
+          return {
+            success: true,
+            intent: 'greeting_with_order',
+            response: `¡Hola! 😊 
+
+Veo que tenés un pedido en progreso:
+
+${summary}
+
+💰 Total: $${total.toFixed(2)}
+
+¿Querés continuar con este pedido, modificarlo, o empezar uno nuevo?`,
+            aiService: 'intelligent_simple'
+          };
+        }
+      }
+
+      // No incomplete order - fresh greeting
+      const restaurantName = restaurantConfig?.restaurantName || 'nuestro restaurante';
+      return {
+        success: true,
+        intent: 'greeting_fresh',
+        response: `¡Hola! Bienvenido a ${restaurantName} 😊
+
+¿En qué puedo ayudarte hoy?
+
+🍽️ Podés pedirme directamente lo que querés
+📋 O escribí "menú" para ver todas las opciones
+
+_Ejemplo: "Quiero una docena de empanadas de carne"_`,
+        aiService: 'intelligent_simple'
+      };
+
+    } catch (error) {
+      console.error('Error handling greeting:', error);
+      return {
+        success: true,
+        intent: 'greeting_error',
+        response: '¡Hola! ¿En qué puedo ayudarte con tu pedido? 😊',
+        aiService: 'intelligent_simple'
+      };
+    }
   }
 
   /**
